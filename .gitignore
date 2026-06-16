@@ -1,6 +1,9 @@
 # Data artefacts
 data/
 
+# Trained model artefacts
+models/
+
 # Python
 __pycache__/
 *.pyc
