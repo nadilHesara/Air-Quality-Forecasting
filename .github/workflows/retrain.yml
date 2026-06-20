@@ -11,9 +11,10 @@ name: Weekly model retrain
 #   * manual    — workflow_dispatch (Run workflow button).
 #
 # What it does: installs deps, runs the single end-to-end entry point
-# (src/train.py: fetch → features → train → evaluate → save + MLflow), then
-# commits the refreshed model, reports, and MLflow runs back to the branch —
-# but only if something actually changed (idempotent: no empty commits).
+# (src/train.py: fetch → features → train → evaluate → save + MLflow), commits
+# the refreshed model + reports back, and uploads mlruns/ as a build artifact.
+# mlruns/ is NOT committed because MLflow's file store embeds absolute paths
+# at creation time — a Windows-built mlruns/ breaks on Linux CI.
 
 on:
   schedule:
@@ -76,22 +77,23 @@ jobs:
 
       - name: Train model (fetch -> features -> train -> evaluate -> save)
         env:
-          # Local file-based MLflow store committed to the repo. Override here
-          # (or as a repo variable/secret) to log to a remote tracking server.
+          # If the repo variable MLFLOW_TRACKING_URI is set (Settings → Variables),
+          # logs go to that remote server. Otherwise falls back to ./mlruns locally.
           MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
         run: |
           echo "::group::python -m src.train"
           python -m src.train
           echo "::endgroup::"
 
-      - name: Commit refreshed model, reports, and MLflow runs
+      - name: Commit refreshed model and reports
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Stage only the retrain outputs (forced because models/ is otherwise
-          # git-ignored for local dev; the canonical artifact is committed here).
-          git add --force models/model.joblib reports/ mlruns/
+          # Stage only the retrain outputs. models/model.joblib needs --force
+          # because models/* is git-ignored for local dev; the canonical
+          # artifact is version-controlled via the !models/model.joblib negation.
+          git add --force models/model.joblib reports/
 
           if git diff --cached --quiet; then
             echo "No changes to commit — model and metrics are unchanged. Skipping."
@@ -102,3 +104,11 @@ jobs:
           git diff --cached --stat
           git commit -m "chore: weekly model retrain [skip ci]"
           git push
+
+      - name: Upload MLflow runs as build artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlruns-${{ github.run_number }}
+          path: mlruns/
+          retention-days: 30

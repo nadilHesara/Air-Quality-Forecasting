@@ -1,9 +1,0 @@
-artifact_location: file:///D:/Projects/ML%20Projects/Air-Quality-Forecasting/mlruns/544193671400105608
-creation_time: 1781965768147
-effective_trace_archival_retention: null
-experiment_id: '544193671400105608'
-last_update_time: 1781965768147
-lifecycle_stage: active
-name: pm25-next-day-forecast
-trace_location: null
-workspace: default

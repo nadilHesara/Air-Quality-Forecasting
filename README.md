@@ -35,7 +35,7 @@ Air-Quality-Forecasting/
 │   └── retrain.yml         # Weekly cron + manual retrain, commits model back
 ├── models/
 │   └── model.joblib            (committed; refreshed by src.train / retrain CI)
-├── mlruns/                     # MLflow local tracking store (committed)
+├── mlruns/                     # MLflow local tracking store (gitignored; uploaded as CI artifact)
 ├── data/
 │   └── training_data.parquet   (generated)
 └── reports/
@@ -144,9 +144,10 @@ run that logs:
 - **Model** — logged via `mlflow.sklearn.log_model` with an inferred signature
   and input example.
 
-The tracking store is **local and file-based**, committed to the repo under
-[`mlruns/`](mlruns/), so experiment history travels with the code and CI runs
-append to it. `src/train.py` enables the file store automatically; to browse
+The tracking store is **local and file-based** (`mlruns/`), created on first
+run and gitignored (MLflow's file store embeds the absolute artifact path at
+creation time, so a `mlruns/` built on Windows would break on a Linux CI runner
+and vice versa). `src/train.py` enables the file store automatically; to browse
 runs with the MLflow UI you set the same opt-in (MLflow 3.x gates the file
 backend behind it):
 
@@ -157,6 +158,9 @@ $env:MLFLOW_ALLOW_FILE_STORE = "true"; mlflow ui --backend-store-uri mlruns
 MLFLOW_ALLOW_FILE_STORE=true mlflow ui --backend-store-uri mlruns
 # then open http://localhost:5000
 ```
+
+Each CI retrain run uploads its `mlruns/` as a downloadable build artifact
+(retained 30 days) under **Actions → run → Artifacts**.
 
 #### Pointing MLflow at a remote tracking server
 

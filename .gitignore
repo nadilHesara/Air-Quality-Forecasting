@@ -10,9 +10,12 @@ data/
 models/*
 !models/model.joblib
 
-# MLflow local tracking store is intentionally committed (experiment history),
-# so it is NOT ignored here. To use a remote tracking server instead, set
-# MLFLOW_TRACKING_URI (see README) — nothing local needs to change.
+# MLflow local tracking store — NOT committed. The file store embeds absolute
+# paths in meta.yaml at creation time, so a Windows-built mlruns/ breaks on
+# Linux CI (and vice versa). Keep mlruns/ local-only; the workflow uploads it
+# as a build artifact instead. To persist experiment history across machines,
+# point MLFLOW_TRACKING_URI at a remote server (see README).
+mlruns/
 
 # Python
 __pycache__/
