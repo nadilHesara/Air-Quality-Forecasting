@@ -41,7 +41,31 @@ HOURLY_AQ_VARIABLES: list[str] = [
 PROJECT_ROOT: Path = Path(__file__).resolve().parent
 DATA_DIR: Path = PROJECT_ROOT / "data"
 REPORTS_DIR: Path = PROJECT_ROOT / "reports"
+MODELS_DIR: Path = PROJECT_ROOT / "models"
+
+# ── Training / evaluation knobs ──────────────────────────────────────────────
+# Kept here (not hardcoded in train.py or the CI workflow) so the whole
+# pipeline is reconfigured from one place.
+TEST_HORIZON_DAYS: int = 90   # most-recent window held out as the final test set
+N_CV_SPLITS: int = 5          # expanding-window TimeSeriesSplit folds (train pool)
+RANDOM_STATE: int = 42
+
+# ── MLOps: experiment tracking (MLflow) ──────────────────────────────────────
+# Local, file-based tracking store committed to the repo (mlruns/).  To point
+# at a remote tracking server instead, set the MLFLOW_TRACKING_URI environment
+# variable (e.g. "http://my-mlflow-server:5000") — it overrides the local
+# default below.  See the README ("Pointing MLflow at a remote server").
+MLFLOW_TRACKING_URI: str = (PROJECT_ROOT / "mlruns").as_uri()
+MLFLOW_EXPERIMENT_NAME: str = "pm25-next-day-forecast"
+
+# ── MLOps: automated retraining schedule ─────────────────────────────────────
+# Cron expression (UTC) consumed by .github/workflows/retrain.yml so the
+# schedule lives in config, not the workflow.  The workflow reads this value
+# at run time; changing the cadence here keeps the workflow generic.
+# Default: 03:00 UTC every Monday (weekly).
+RETRAIN_CRON: str = "0 3 * * 1"
 
 # Ensure output directories exist on import
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+MODELS_DIR.mkdir(parents=True, exist_ok=True)

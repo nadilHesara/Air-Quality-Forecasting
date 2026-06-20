@@ -1,0 +1,104 @@
+name: Weekly model retrain
+
+# Automated retraining for the next-day PM2.5 model.
+#
+# Triggers:
+#   * schedule  — weekly cron (UTC). The canonical schedule lives in
+#                 config.py as RETRAIN_CRON; the literal below must match it
+#                 (GitHub parses the cron from YAML, so it can't be injected
+#                 from Python at parse time). A guard step verifies they agree
+#                 and fails loudly if someone changes one without the other.
+#   * manual    — workflow_dispatch (Run workflow button).
+#
+# What it does: installs deps, runs the single end-to-end entry point
+# (src/train.py: fetch → features → train → evaluate → save + MLflow), then
+# commits the refreshed model, reports, and MLflow runs back to the branch —
+# but only if something actually changed (idempotent: no empty commits).
+
+on:
+  schedule:
+    # Keep in sync with config.RETRAIN_CRON ("0 3 * * 1" = 03:00 UTC Mondays).
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+# Never let two retrains run (and push) at once.
+concurrency:
+  group: retrain-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Show run configuration (city / dates / schedule from config.py)
+        run: |
+          echo "::group::Training configuration (read from config.py)"
+          python - <<'PY'
+          import config
+          print(f"City              : {config.CITY_NAME} ({config.LATITUDE}, {config.LONGITUDE})")
+          print(f"Date range        : {config.START_DATE} -> {config.END_DATE}")
+          print(f"Test horizon (d)  : {config.TEST_HORIZON_DAYS}")
+          print(f"CV splits         : {config.N_CV_SPLITS}")
+          print(f"MLflow experiment : {config.MLFLOW_EXPERIMENT_NAME}")
+          print(f"Retrain schedule  : {config.RETRAIN_CRON}")
+          PY
+          echo "::endgroup::"
+
+      - name: Verify workflow cron matches config.RETRAIN_CRON
+        run: |
+          CONFIG_CRON="$(python -c 'import config; print(config.RETRAIN_CRON)')"
+          WORKFLOW_CRON="0 3 * * 1"
+          echo "config.RETRAIN_CRON = '$CONFIG_CRON'"
+          echo "workflow schedule   = '$WORKFLOW_CRON'"
+          if [ "$CONFIG_CRON" != "$WORKFLOW_CRON" ]; then
+            echo "::error::Schedule drift: config.RETRAIN_CRON ('$CONFIG_CRON') does not match the cron in retrain.yml ('$WORKFLOW_CRON'). Update both to keep them in sync."
+            exit 1
+          fi
+
+      - name: Train model (fetch -> features -> train -> evaluate -> save)
+        env:
+          # Local file-based MLflow store committed to the repo. Override here
+          # (or as a repo variable/secret) to log to a remote tracking server.
+          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+        run: |
+          echo "::group::python -m src.train"
+          python -m src.train
+          echo "::endgroup::"
+
+      - name: Commit refreshed model, reports, and MLflow runs
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Stage only the retrain outputs (forced because models/ is otherwise
+          # git-ignored for local dev; the canonical artifact is committed here).
+          git add --force models/model.joblib reports/ mlruns/
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit — model and metrics are unchanged. Skipping."
+            exit 0
+          fi
+
+          echo "Changes detected; committing retrain outputs."
+          git diff --cached --stat
+          git commit -m "chore: weekly model retrain [skip ci]"
+          git push

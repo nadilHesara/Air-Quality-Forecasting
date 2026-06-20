@@ -1,0 +1,54 @@
+artifact_path: file:///D:/Projects/ML%20Projects/Air-Quality-Forecasting/mlruns/544193671400105608/models/m-e73cd102875b4d38aa2d2ee39d43e1bc/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.pkl
+    predict_fn: predict
+    python_version: 3.14.4
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: cloudpickle
+    sklearn_version: 1.9.0
+    skops_trusted_types: null
+is_signature_from_type_hint: false
+mlflow_version: 3.14.0
+model_id: m-e73cd102875b4d38aa2d2ee39d43e1bc
+model_size_bytes: 734593
+model_uuid: m-e73cd102875b4d38aa2d2ee39d43e1bc
+prompts: null
+run_id: 3a63096f8d1141d3a5b8ca8ab806c74e
+saved_input_example_info:
+  artifact_path: input_example.json
+  pandas_orient: split
+  serving_input_path: serving_input_example.json
+  type: dataframe
+signature:
+  inputs: '[{"type": "double", "name": "pm2_5_mean", "required": true}, {"type": "double",
+    "name": "pm10_mean", "required": true}, {"type": "double", "name": "temperature_2m_mean",
+    "required": true}, {"type": "double", "name": "wind_speed_10m_max", "required":
+    true}, {"type": "long", "name": "wind_direction_10m_dominant", "required": true},
+    {"type": "long", "name": "relative_humidity_2m_mean", "required": true}, {"type":
+    "double", "name": "precipitation_sum", "required": true}, {"type": "double", "name":
+    "surface_pressure_mean", "required": true}, {"type": "double", "name": "pm25_lag1",
+    "required": true}, {"type": "double", "name": "pm25_lag2", "required": true},
+    {"type": "double", "name": "pm25_lag3", "required": true}, {"type": "double",
+    "name": "pm25_lag7", "required": true}, {"type": "double", "name": "pm25_lag14",
+    "required": true}, {"type": "double", "name": "pm25_rolling3_mean", "required":
+    true}, {"type": "double", "name": "pm25_rolling3_std", "required": true}, {"type":
+    "double", "name": "pm25_rolling7_mean", "required": true}, {"type": "double",
+    "name": "pm25_rolling7_std", "required": true}, {"type": "double", "name": "pm25_rolling14_mean",
+    "required": true}, {"type": "double", "name": "pm25_rolling14_std", "required":
+    true}, {"type": "double", "name": "pm25_rolling30_mean", "required": true}, {"type":
+    "double", "name": "pm25_rolling30_std", "required": true}, {"type": "double",
+    "name": "pm25_diff1", "required": true}, {"type": "integer", "name": "day_of_week",
+    "required": true}, {"type": "integer", "name": "month", "required": true}, {"type":
+    "integer", "name": "day_of_year", "required": true}, {"type": "long", "name":
+    "is_weekend", "required": true}]'
+  outputs: '[{"type": "tensor", "tensor-spec": {"dtype": "float64", "shape": [-1]}}]'
+  params: null
+type_hint_from_example: false
+utc_time_created: '2026-06-20 14:29:32.504926'
