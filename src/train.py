@@ -690,7 +690,11 @@ def main(argv: list[str] | None = None) -> None:
     # the local file store committed to the repo.
     import os
 
-    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", config.MLFLOW_TRACKING_URI)
+    # An *empty* MLFLOW_TRACKING_URI (e.g. an unset GitHub Actions repo variable
+    # expands to "") must be treated as absent, not as a valid empty URI —
+    # otherwise os.environ.get(..., default) would return "" and MLflow would get
+    # an invalid tracking URI. Fall back to the committed local store in that case.
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI") or config.MLFLOW_TRACKING_URI
 
     # MLflow 3.x puts the file-based store in "maintenance mode" and refuses to
     # use it unless this opt-in is set.  We intentionally use the committed

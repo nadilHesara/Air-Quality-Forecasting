@@ -78,10 +78,19 @@ jobs:
       - name: Train model (fetch -> features -> train -> evaluate -> save)
         env:
           # If the repo variable MLFLOW_TRACKING_URI is set (Settings → Variables),
-          # logs go to that remote server. Otherwise falls back to ./mlruns locally.
+          # logs go to that remote server; otherwise train.py falls back to the
+          # local ./mlruns store.  NOTE: when the variable is unset this expands
+          # to the empty string, which is *present* — so the shell guard in `run`
+          # below unsets it, letting train.py's default apply (a bare empty URI
+          # would otherwise be handed to MLflow and silently break the fallback).
           MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
         run: |
           echo "::group::python -m src.train"
+          # Drop the variable entirely if it came through empty, so train.py
+          # uses its committed local-store default instead of an empty URI.
+          if [ -z "${MLFLOW_TRACKING_URI}" ]; then
+            unset MLFLOW_TRACKING_URI
+          fi
           python -m src.train
           echo "::endgroup::"
 
@@ -103,7 +112,30 @@ jobs:
           echo "Changes detected; committing retrain outputs."
           git diff --cached --stat
           git commit -m "chore: weekly model retrain [skip ci]"
-          git push
+
+          # `actions/checkout` fetches only the triggering commit, so `main` may
+          # have advanced since (manual commits interleave the weekly retrains).
+          # A plain `git push` would then be rejected as non-fast-forward and
+          # fail the job. Rebase our single retrain commit onto the latest remote
+          # tip before pushing; the retrain only touches models/model.joblib and
+          # reports/ (regenerated wholesale each run), so a rebase won't conflict.
+          # One retry covers the narrow window between fetch and push.
+          branch="${GITHUB_REF_NAME}"
+          pushed=false
+          for attempt in 1 2 3; do
+            git fetch origin "$branch"
+            if git rebase "origin/$branch" && git push origin "HEAD:$branch"; then
+              pushed=true
+              break
+            fi
+            echo "Push attempt $attempt failed (branch advanced); retrying…"
+            git rebase --abort 2>/dev/null || true
+            sleep 5
+          done
+          if [ "$pushed" != "true" ]; then
+            echo "::error::Could not push retrain outputs after 3 attempts (branch kept advancing)."
+            exit 1
+          fi
 
       - name: Upload MLflow runs as build artifact
         if: always()
