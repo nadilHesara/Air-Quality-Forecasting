@@ -93,7 +93,11 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 python-multipart==0.0.32
 pytz==2026.2
-pywin32==312
+# Windows-only (no Linux/macOS distribution). The marker makes pip skip it off
+# Windows so `pip install -r requirements.lock` works on the Linux CI runner;
+# without it, CI fails with "No matching distribution found for pywin32".
+# `pip freeze` drops this marker, so re-add it after regenerating the lock.
+pywin32==312; sys_platform == 'win32'
 PyYAML==6.0.3
 referencing==0.37.0
 requests==2.34.2
