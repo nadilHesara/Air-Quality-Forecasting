@@ -103,24 +103,39 @@ def _today_utc() -> date:
 
 
 def load_model(model_path: Path = MODEL_PATH) -> dict[str, Any]:
-    """Load the serialized model bundle, with a clear error if it's missing.
+    """Load the serving model bundle, with a clear error if it's missing.
+
+    Two sources, selected by the ``MODEL_SOURCE`` environment variable:
+
+    - ``local`` (default) — the committed ``models/model.joblib``.  Works with
+      zero infrastructure.
+    - ``registry`` — the current **production** version in the MLflow Model
+      Registry (resolved via the ``@production`` alias; requires
+      ``MLFLOW_TRACKING_URI`` to point at a registry-capable backend — see
+      ``src/registry.py`` and the README).
 
     Returns the dict persisted by ``src/train.py``:
-    ``{"model", "feature_names", "target", "trained_through"}``.
+    ``{"model", "feature_names", "target", "trained_through", ...}``.
     """
-    if not model_path.exists():
-        raise ModelNotFoundError(
-            f"Model file not found at '{model_path}'. "
-            "Train the model first with `python -m src.train` "
-            "(which requires `python -m src.build_dataset` to have run)."
-        )
-    bundle = joblib.load(model_path)
+    import os
+
+    if os.environ.get("MODEL_SOURCE", "local").strip().lower() == "registry":
+        from src.registry import load_production_bundle
+
+        bundle = load_production_bundle()
+    else:
+        if not model_path.exists():
+            raise ModelNotFoundError(
+                f"Model file not found at '{model_path}'. "
+                "Train the model first with `python -m src.train` "
+                "(which requires `python -m src.build_dataset` to have run)."
+            )
+        bundle = joblib.load(model_path)
     required = {"model", "feature_names", "target"}
     missing = required - set(bundle)
     if missing:
         raise ValueError(
-            f"Model artifact at '{model_path}' is malformed; missing key(s): "
-            f"{sorted(missing)}."
+            f"Model bundle is malformed; missing key(s): {sorted(missing)}."
         )
     return bundle
 

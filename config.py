@@ -65,6 +65,51 @@ QUANTILE_LEVELS: tuple[float, ...] = (0.1, 0.5, 0.9)
 MLFLOW_TRACKING_URI: str = (PROJECT_ROOT / "mlruns").as_uri()
 MLFLOW_EXPERIMENT_NAME: str = "pm25-next-day-forecast"
 
+# The Model Registry name used when a registry-capable tracking backend is
+# configured (sqlite:// or a remote server — the plain file store has no
+# registry).  Training registers each new model here under the "staging"
+# alias; the promotion gate moves it to "production".  See src/registry.py.
+MLFLOW_REGISTERED_MODEL_NAME: str = "pm25-next-day"
+
+# ── MLOps: data validation (run before every training) ──────────────────────
+# Hard gates checked by src/validate.py on the fetched training frame.
+# A violation aborts the run loudly instead of training on garbage.
+MIN_TRAINING_ROWS: int = 400                      # lags/CV/test need real history
+PM25_VALID_RANGE: tuple[float, float] = (0.0, 500.0)    # µg/m³, sane daily means
+PM10_VALID_RANGE: tuple[float, float] = (0.0, 1000.0)   # µg/m³
+MAX_NAN_FRACTION: float = 0.05                    # per required raw column
+MAX_DATE_GAP_DAYS: int = 14                       # largest tolerated hole in the index
+
+# ── MLOps: champion/challenger promotion gate ────────────────────────────────
+# After a retrain, the new model's held-out test MAE is compared to the
+# previously committed reports/metrics.json.  The new model is promoted only
+# if its MAE is not worse than the champion's by more than this percentage
+# (the test window shifts week to week, so a small tolerance avoids rejecting
+# every run on noise).  See src/promotion_gate.py.
+PROMOTION_MAX_MAE_REGRESSION_PCT: float = 5.0
+
+# ── MLOps: drift monitoring ──────────────────────────────────────────────────
+# src/drift.py compares the most recent DRIFT_WINDOW_DAYS of feature values
+# against the reference profile persisted at training time
+# (reports/feature_reference.json) using the Population Stability Index.
+# The reference is month-conditional (recent values are scored against the
+# same calendar months across all training years) so the strong seasonality
+# of PM2.5 doesn't trip the alarm every monsoon.  It also checks recent live
+# prediction error against the committed test MAE.  60 days keeps the PSI
+# sampling noise well below the warn threshold with quintile bins.
+DRIFT_WINDOW_DAYS: int = 60
+DRIFT_PSI_WARN: float = 0.10       # conventional "some shift" threshold
+DRIFT_PSI_ALERT: float = 0.25      # conventional "significant shift" threshold
+DRIFT_ERROR_RATIO_ALERT: float = 1.5  # recent MAE > 1.5 × test MAE → alert
+
+# ── MLOps: walk-forward backtesting ──────────────────────────────────────────
+# src/backtest.py refits the model repeatedly through history: first train on
+# BACKTEST_INITIAL_TRAIN_DAYS, evaluate the next BACKTEST_STEP_DAYS, then roll
+# the window forward and repeat — a far more robust performance estimate than
+# the single 90-day held-out window.
+BACKTEST_INITIAL_TRAIN_DAYS: int = 365
+BACKTEST_STEP_DAYS: int = 30
+
 # ── MLOps: automated retraining schedule ─────────────────────────────────────
 # Cron expression (UTC) consumed by .github/workflows/retrain.yml so the
 # schedule lives in config, not the workflow.  The workflow reads this value

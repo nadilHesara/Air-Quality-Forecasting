@@ -1,0 +1,140 @@
+{
+  "checked_utc": "2026-07-02T15:41:32+00:00",
+  "window_days": 60,
+  "feature_drift": {
+    "reference_created": "2026-07-02T15:41:27+00:00",
+    "recent_window": [
+      "2026-04-15",
+      "2026-06-13"
+    ],
+    "n_alert": 21,
+    "n_warn": 1,
+    "features": [
+      {
+        "feature": "pm25_rolling30_std",
+        "psi": 5.4043,
+        "status": "alert"
+      },
+      {
+        "feature": "pm25_rolling14_mean",
+        "psi": 4.7837,
+        "status": "alert"
+      },
+      {
+        "feature": "pm25_rolling14_std",
+        "psi": 4.1545,
+        "status": "alert"
+      },
+      {
+        "feature": "pm25_rolling30_mean",
+        "psi": 3.0727,
+        "status": "alert"
+      },
+      {
+        "feature": "surface_pressure_mean",
+        "psi": 2.9829,
+        "status": "alert"
+      },
+      {
+        "feature": "pm10_mean",
+        "psi": 2.8816,
+        "status": "alert"
+      },
+      {
+        "feature": "pm25_rolling3_mean",
+        "psi": 2.2472,
+        "status": "alert"
+      },
+      {
+        "feature": "pm25_rolling7_mean",
+        "psi": 2.0645,
+        "status": "alert"
+      },
+      {
+        "feature": "relative_humidity_2m_mean",
+        "psi": 1.9622,
+        "status": "alert"
+      },
+      {
+        "feature": "wind_speed_10m_max",
+        "psi": 1.9057,
+        "status": "alert"
+      },
+      {
+        "feature": "pm2_5_mean",
+        "psi": 1.7681,
+        "status": "alert"
+      },
+      {
+        "feature": "pm25_rolling7_std",
+        "psi": 1.5563,
+        "status": "alert"
+      },
+      {
+        "feature": "pm25_lag1",
+        "psi": 1.4507,
+        "status": "alert"
+      },
+      {
+        "feature": "temperature_2m_mean",
+        "psi": 1.2274,
+        "status": "alert"
+      },
+      {
+        "feature": "pm25_lag2",
+        "psi": 1.099,
+        "status": "alert"
+      },
+      {
+        "feature": "pm25_rolling3_std",
+        "psi": 0.8496,
+        "status": "alert"
+      },
+      {
+        "feature": "pm25_lag3",
+        "psi": 0.8278,
+        "status": "alert"
+      },
+      {
+        "feature": "pm25_lag14",
+        "psi": 0.8024,
+        "status": "alert"
+      },
+      {
+        "feature": "pm25_lag7",
+        "psi": 0.7958,
+        "status": "alert"
+      },
+      {
+        "feature": "wind_direction_10m_dominant",
+        "psi": 0.5934,
+        "status": "alert"
+      },
+      {
+        "feature": "precipitation_sum",
+        "psi": 0.5616,
+        "status": "alert"
+      },
+      {
+        "feature": "pm25_diff1",
+        "psi": 0.1463,
+        "status": "warn"
+      }
+    ]
+  },
+  "error_drift": {
+    "window_days": 60,
+    "window": [
+      "2026-04-14",
+      "2026-06-12"
+    ],
+    "recent_mae": 2.6060429013925637,
+    "committed_test_mae": 3.3124038779709557,
+    "ratio": 0.787,
+    "alert": false
+  },
+  "drift_detected": true,
+  "alerts": [
+    "21 feature(s) with PSI \u2265 0.25: pm25_rolling30_std, pm25_rolling14_mean, pm25_rolling14_std, pm25_rolling30_mean, surface_pressure_mean, pm10_mean, pm25_rolling3_mean, pm25_rolling7_mean, relative_humidity_2m_mean, wind_speed_10m_max, pm2_5_mean, pm25_rolling7_std, pm25_lag1, temperature_2m_mean, pm25_lag2, pm25_rolling3_std, pm25_lag3, pm25_lag14, pm25_lag7, wind_direction_10m_dominant, precipitation_sum"
+  ]
+}

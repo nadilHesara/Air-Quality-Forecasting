@@ -60,12 +60,14 @@ from sklearn.model_selection import TimeSeriesSplit
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config  # noqa: E402
 from src.build_dataset import build_training_dataset  # noqa: E402
+from src.drift import save_reference_profile  # noqa: E402
 from src.features import (  # noqa: E402
     RAW_PM_COLUMN,
     TARGET_COLUMN,
     build_supervised,
     feature_names,
 )
+from src.validate import validate_training_frame  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -469,13 +471,20 @@ def run_training(raw: pd.DataFrame) -> dict:
 
     results_path = _write_results_md(metrics)
 
+    # Drift reference (Phase 7.4): persist the train-pool feature distribution
+    # so future retrains can score fresh data against it (see src/drift.py).
+    reference_path = save_reference_profile(
+        X_train, config.REPORTS_DIR / "feature_reference.json"
+    )
+
     # ── MLflow logging -------------------------------------------------------
     _log_to_mlflow(
         metrics=metrics,
         model=model,
         X_train=X_train,
         trained_through=trained_through,
-        artifacts=[metrics_path, shap_path, results_path, model_path],
+        artifacts=[metrics_path, shap_path, results_path, reference_path],
+        bundle_path=model_path,
     )
 
     return metrics
@@ -488,6 +497,7 @@ def _log_to_mlflow(
     X_train: pd.DataFrame,
     trained_through: str,
     artifacts: list[Path],
+    bundle_path: Path | None = None,
 ) -> None:
     """Log params, metrics, artifacts, and the model to the active run."""
     d = metrics["dataset"]
@@ -540,15 +550,21 @@ def _log_to_mlflow(
         }
     )
 
-    # Artifacts: SHAP plot, metrics.json, results.md (the .joblib bundle is
-    # logged here too so the run is self-contained alongside the proper model).
+    # Artifacts: SHAP plot, metrics.json, results.md, feature reference.
     for path in artifacts:
         if path.exists():
             mlflow.log_artifact(str(path), artifact_path="reports")
 
+    # The full serving bundle (point + quantile models + conformal offsets)
+    # under a stable artifact path — src/registry.py downloads exactly this
+    # when serving loads a registered model version.
+    if bundle_path is not None and bundle_path.exists():
+        mlflow.log_artifact(str(bundle_path), artifact_path="model_bundle")
+
     # The model itself, with a signature inferred from a sample of inputs.
     # cloudpickle is used explicitly because MLflow 3.x's default skops format
     # refuses to serialize LightGBM's Booster as an "untrusted type".
+    model_logged = False
     try:
         from mlflow.models.signature import infer_signature
 
@@ -560,12 +576,20 @@ def _log_to_mlflow(
             input_example=X_train.head(),
             serialization_format="cloudpickle",
         )
+        model_logged = True
     except Exception as exc:  # pragma: no cover - logging must not break training
         logger.warning("Could not log model to MLflow (%s); continuing.", exc)
 
     run = mlflow.active_run()
     if run is not None:
         logger.info("MLflow run logged: id=%s", run.info.run_id)
+        # Model Registry (Phase 7.3): register this run's model under the
+        # "staging" alias.  No-op with a clear warning on the plain file
+        # store, which has no registry backend.
+        if model_logged:
+            from src.registry import register_run_model
+
+            register_run_model(run.info.run_id)
 
 
 def _save_shap_summary(model: LGBMRegressor, X_test: pd.DataFrame) -> Path:
@@ -718,6 +742,12 @@ def main(argv: list[str] | None = None) -> None:
         "Loaded %d daily rows (%s → %s)",
         len(raw), raw.index.min().date(), raw.index.max().date(),
     )
+
+    # Validate BEFORE training: schema, ranges, volume, index integrity.
+    # A violation raises DataValidationError and fails the run (and the CI
+    # retrain job) loudly instead of fitting a model to broken data.
+    _banner("Data validation (schema / ranges / volume)")
+    validate_training_frame(raw)
 
     with mlflow.start_run() as run:
         logger.info("Started MLflow run: %s", run.info.run_id)

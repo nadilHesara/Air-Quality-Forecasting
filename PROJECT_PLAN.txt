@@ -99,7 +99,8 @@
       file. CI could silently break on a dependency bump. See Phase 5.
 
  (D6) NO INPUT/DRIFT MONITORING. Retraining is blind — no check that new data
-      is sane or that model quality hasn't regressed before committing. Phase 7.
+      is sane or that model quality hasn't regressed before committing.
+      [FIXED 2026-07-02 by Phase 7: validate.py + drift.py + promotion_gate.py]
 
  (D7) SECRETS/ENV NOT DOCUMENTED for deployment; no Dockerfile. Phase 8.
 
@@ -181,29 +182,57 @@
  GOAL: Make automated retraining safe and observable — don't blindly commit a
        worse model.
 
- TASKS:
-   [ ] 7.1  Data validation before training: schema + range checks on the fetched
-            frame (row count, no all-NaN columns, PM2.5 within sane bounds,
-            dates monotonic). Fail the run loudly on violation. (pandera or a
-            hand-rolled validate() step.)
-   [ ] 7.2  Champion/challenger gate in retrain.yml: after training, compare new
-            test MAE to the previous committed metrics.json. Only commit the new
-            model if it's within tolerance / not worse by more than X%. Otherwise
-            fail the job and keep the old model.
-   [ ] 7.3  MLflow Model Registry: register models with stages (Staging/Prod)
-            instead of committing model.joblib to git. Serving loads the current
-            Prod model. (Requires a persistent tracking server — see 7.5.)
-   [ ] 7.4  Drift monitoring: log rolling input-feature distributions and recent
-            live-vs-actual prediction error; alert (or open an issue) on drift.
-   [ ] 7.5  Stand up a persistent MLflow tracking server (or managed backend)
-            and set MLFLOW_TRACKING_URI in CI so runs aren't ephemeral. Then
-            stop committing mlruns/ (README already documents this path).
-   [ ] 7.6  Backtesting harness: walk-forward evaluation across the whole
-            history (retrain at each step) for a robust performance estimate,
-            not just the single 90-day window.
+ TASKS:  (completed 2026-07-02)
+   [x] 7.1  Data validation before training: src/validate.py (hand-rolled, no
+            pandera dep) — schema, row count, NaN budget, physical ranges,
+            monotonic/unique dates, max gap, constant-feed check. Called by
+            src/train.py before training; raises DataValidationError listing
+            EVERY violation. Standalone: `python -m src.validate`. Knobs in
+            config.py (MIN_TRAINING_ROWS, PM25_VALID_RANGE, ...).
+   [x] 7.2  Champion/challenger gate: src/promotion_gate.py compares the new
+            test MAE against the pre-training snapshot of metrics.json; the
+            retrain job FAILS (nothing committed, old model keeps serving)
+            if MAE regressed > config.PROMOTION_MAX_MAE_REGRESSION_PCT (5%).
+            Verdict is appended to the GitHub step summary.
+   [x] 7.3  MLflow Model Registry: src/registry.py registers each training
+            run's model under the @staging alias (aliases are MLflow 3.x's
+            replacement for the removed Staging/Prod stages); the CI gate
+            then promotes @staging → @production. Serving loads the current
+            production bundle when MODEL_SOURCE=registry (src/inference.py);
+            without a registry backend everything degrades gracefully to the
+            committed models/model.joblib, so model.joblib stays committed as
+            the zero-infrastructure fallback until a remote server is set.
+   [x] 7.4  Drift monitoring: src/drift.py. Training persists a MONTH-
+            CONDITIONAL feature-distribution reference profile
+            (reports/feature_reference.json — a June is compared with past
+            Junes; a pooled reference would alarm every monsoon), scored with
+            PSI over the last 60 days; plus recent live-vs-actual MAE vs the
+            committed test MAE. retrain.yml runs it on fresh data BEFORE
+            training and opens/updates a GitHub issue (label: drift) on
+            alert — drift never blocks the retrain.
+   [x] 7.5  Persistent tracking server: scripts/start_mlflow_server.{sh,ps1}
+            run a SQLite-backed, registry-capable server; retrain.yml already
+            forwards the MLFLOW_TRACKING_URI repo variable and (when set)
+            promotes in the registry and skips the mlruns/ artifact upload.
+            mlruns/ was already gitignored/uncommitted. NOTE: actually
+            provisioning a CI-reachable server (self-host / DagsHub /
+            Databricks) is an infra decision left to the operator — set the
+            repo variable and everything activates.
+   [x] 7.6  Backtesting harness: src/backtest.py walk-forward evaluation
+            (train 365 d → forecast 30 d → roll forward, refit each step;
+            24 folds, 693 out-of-sample predictions). Outputs
+            reports/backtest.{json,md} + backtest_mae.png. FINDING: pooled
+            MAE 4.23 vs persistence 4.16 (−1.7%), 11/24 folds beat
+            persistence; RMSE slightly better (5.82 vs 5.90). The single
+            90-day window's +4.5% was optimistic — reinforces the Phase 6
+            honest framing (persistence is intrinsically strong; value-add =
+            intervals + seasonal-naive win + RMSE).
 
- DONE WHEN: A retrain that produces a worse model does NOT get promoted; input
-            data is validated; model provenance lives in a registry, not git.
+ DONE WHEN: A retrain that produces a worse model does NOT get promoted ✓
+            (gate fails the job); input data is validated ✓ (validate.py
+            hard-fails training); model provenance lives in a registry ✓
+            (when MLFLOW_TRACKING_URI is set; committed model.joblib remains
+            as the documented zero-infra fallback).
 
 
 --------------------------------------------------------------------------------

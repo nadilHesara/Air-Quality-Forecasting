@@ -1,6 +1,8 @@
 name: Weekly model retrain
 
-# Automated retraining for the next-day PM2.5 model.
+# Automated retraining for the next-day PM2.5 model — with the Phase 7 safety
+# rails: the job validates its inputs, checks for drift, and only commits the
+# new model if it is not worse than the one already serving.
 #
 # Triggers:
 #   * schedule  — weekly cron (UTC). The canonical schedule lives in
@@ -10,11 +12,26 @@ name: Weekly model retrain
 #                 and fails loudly if someone changes one without the other.
 #   * manual    — workflow_dispatch (Run workflow button).
 #
-# What it does: installs deps, runs the single end-to-end entry point
-# (src/train.py: fetch → features → train → evaluate → save + MLflow), commits
-# the refreshed model + reports back, and uploads mlruns/ as a build artifact.
+# Pipeline (each step gates the next):
+#   1. Snapshot the committed champion metrics (for the promotion gate).
+#   2. Fetch fresh data (python -m src.build_dataset).
+#   3. Drift check — score the new data against the champion's feature
+#      reference profile and recent prediction error (src/drift.py). Drift
+#      does NOT block the retrain, but it opens/updates a GitHub issue.
+#   4. Train (python -m src.train --use-cached). Training itself validates
+#      the data (src/validate.py) and FAILS the job on schema/range/volume
+#      violations — no model is fit to broken data.
+#   5. Champion/challenger gate (src/promotion_gate.py) — the job FAILS if
+#      the new model's test MAE regressed beyond tolerance, so the old model
+#      and metrics stay committed and serving.
+#   6. If a remote MLflow tracking server is configured, promote the newly
+#      registered model version from @staging to @production.
+#   7. Commit the refreshed model + reports back to the branch.
+#
 # mlruns/ is NOT committed because MLflow's file store embeds absolute paths
-# at creation time — a Windows-built mlruns/ breaks on Linux CI.
+# at creation time — a Windows-built mlruns/ breaks on Linux CI. It is
+# uploaded as a build artifact instead (or skipped entirely when a remote
+# MLFLOW_TRACKING_URI repo variable is configured).
 
 on:
   schedule:
@@ -29,6 +46,7 @@ concurrency:
 
 permissions:
   contents: write
+  issues: write # drift alerts are filed as GitHub issues
 
 jobs:
   retrain:
@@ -60,6 +78,7 @@ jobs:
           print(f"Test horizon (d)  : {config.TEST_HORIZON_DAYS}")
           print(f"CV splits         : {config.N_CV_SPLITS}")
           print(f"MLflow experiment : {config.MLFLOW_EXPERIMENT_NAME}")
+          print(f"Gate tolerance    : +{config.PROMOTION_MAX_MAE_REGRESSION_PCT}% MAE")
           print(f"Retrain schedule  : {config.RETRAIN_CRON}")
           PY
           echo "::endgroup::"
@@ -75,24 +94,104 @@ jobs:
             exit 1
           fi
 
-      - name: Train model (fetch -> features -> train -> evaluate -> save)
+      # The gate compares the NEW metrics against the metrics committed at
+      # HEAD, but training overwrites reports/metrics.json in place — so the
+      # champion's copy must be stashed before training runs.
+      - name: Snapshot champion metrics (for the promotion gate)
+        run: |
+          if [ -f reports/metrics.json ]; then
+            cp reports/metrics.json "$RUNNER_TEMP/champion_metrics.json"
+            echo "Champion metrics snapshotted."
+          else
+            echo "No committed metrics.json yet — the gate will bootstrap with the first model."
+          fi
+
+      - name: Fetch fresh data (build training dataset)
+        run: |
+          echo "::group::python -m src.build_dataset"
+          python -m src.build_dataset
+          echo "::endgroup::"
+
+      # Score the freshly fetched data against the CHAMPION's reference
+      # profile and model (both still untouched in the working tree). Drift
+      # alerts but never blocks: exit 1 = drift (flagged, issue opened later),
+      # exit 2 = nothing to compare against yet (first run) — both continue.
+      - name: Drift check (new data vs champion reference/model)
+        id: drift
+        run: |
+          set +e
+          python -m src.drift
+          code=$?
+          set -e
+          echo "drift exit code: $code"
+          if [ "$code" = "1" ]; then
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Input/error drift detected — see reports/drift_report.md"
+          elif [ "$code" = "0" ] || [ "$code" = "2" ]; then
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+          else
+            exit "$code"
+          fi
+          if [ -f reports/drift_report.md ]; then
+            cat reports/drift_report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Open (or update) a drift alert issue
+        if: steps.drift.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create drift --color D93F0B \
+            --description "Automated data/model drift alert from the retrain workflow" \
+            --force
+          existing="$(gh issue list --label drift --state open --json number --jq '.[0].number')"
+          if [ -n "$existing" ]; then
+            echo "Updating existing drift issue #$existing"
+            gh issue comment "$existing" --body-file reports/drift_report.md
+          else
+            gh issue create \
+              --title "Drift alert: $(date -u +%Y-%m-%d) weekly retrain" \
+              --label drift \
+              --body-file reports/drift_report.md
+          fi
+
+      # Training validates the data first (src/validate.py) and fails the job
+      # loudly on schema/range/volume violations — see step summary/logs.
+      - name: Train model (validate -> features -> train -> evaluate -> save)
         env:
           # If the repo variable MLFLOW_TRACKING_URI is set (Settings → Variables),
-          # logs go to that remote server; otherwise train.py falls back to the
-          # local ./mlruns store.  NOTE: when the variable is unset this expands
-          # to the empty string, which is *present* — so the shell guard in `run`
-          # below unsets it, letting train.py's default apply (a bare empty URI
-          # would otherwise be handed to MLflow and silently break the fallback).
+          # logs go to that remote server (and the model is registered in its
+          # Model Registry); otherwise train.py falls back to the local ./mlruns
+          # store.  NOTE: when the variable is unset this expands to the empty
+          # string, which is *present* — so the shell guard in `run` below
+          # unsets it, letting train.py's default apply.
           MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
         run: |
-          echo "::group::python -m src.train"
-          # Drop the variable entirely if it came through empty, so train.py
-          # uses its committed local-store default instead of an empty URI.
+          echo "::group::python -m src.train --use-cached"
           if [ -z "${MLFLOW_TRACKING_URI}" ]; then
             unset MLFLOW_TRACKING_URI
           fi
-          python -m src.train
+          # --use-cached: the dataset was already fetched two steps up; don't
+          # hit the APIs twice (the drift check needed the data first).
+          python -m src.train --use-cached
           echo "::endgroup::"
+
+      # Champion/challenger gate: FAIL the job (and commit nothing) if the new
+      # model's held-out test MAE regressed beyond the configured tolerance.
+      - name: Champion/challenger promotion gate
+        run: |
+          python -m src.promotion_gate \
+            "$RUNNER_TEMP/champion_metrics.json" \
+            reports/metrics.json \
+            --summary-file "$GITHUB_STEP_SUMMARY"
+
+      # With a remote registry configured, flip the alias so serving surfaces
+      # (MODEL_SOURCE=registry) pick up the new version atomically.
+      - name: Promote registered model to @production
+        if: vars.MLFLOW_TRACKING_URI != ''
+        env:
+          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+        run: python -m src.registry promote
 
       - name: Commit refreshed model and reports
         run: |
@@ -144,3 +243,4 @@ jobs:
           name: mlruns-${{ github.run_number }}
           path: mlruns/
           retention-days: 30
+          if-no-files-found: ignore # remote tracking configured → no local mlruns/

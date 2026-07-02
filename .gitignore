@@ -17,6 +17,11 @@ models/*
 # point MLFLOW_TRACKING_URI at a remote server (see README).
 mlruns/
 
+# Persistent local MLflow server backend (scripts/start_mlflow_server.*):
+# the SQLite tracking/registry DB and its artifact store stay machine-local.
+mlflow.db
+mlflow-artifacts/
+
 # Python
 __pycache__/
 *.pyc

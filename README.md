@@ -25,12 +25,19 @@ Air-Quality-Forecasting/
 │   ├── fetch_air_quality.py# Reusable air-quality fetcher
 │   ├── build_dataset.py    # Join + feature engineering + save
 │   ├── features.py         # Single source of truth for features (train + serve)
-│   ├── train.py            # End-to-end: fetch → features → train → evaluate → save (+ MLflow)
+│   ├── validate.py         # Pre-training data validation gate (schema/range/volume)
+│   ├── train.py            # End-to-end: fetch → validate → features → train → evaluate → save (+ MLflow)
+│   ├── promotion_gate.py   # Champion/challenger MAE gate for automated retrains
+│   ├── drift.py            # Seasonal PSI feature-drift + prediction-error monitoring
+│   ├── backtest.py         # Walk-forward backtesting harness (refit through history)
+│   ├── registry.py         # MLflow Model Registry: register / promote / load @production
 │   ├── inference.py        # Shared serving path (fetch → features → predict)
 │   ├── api.py              # FastAPI app (/health, /predict)
 │   └── dashboard.py        # Streamlit dashboard
 ├── scripts/
-│   └── eda.py              # Time-series plot of PM2.5
+│   ├── eda.py              # Time-series plot of PM2.5
+│   ├── start_mlflow_server.ps1  # Persistent registry-capable MLflow server (Windows)
+│   └── start_mlflow_server.sh   # … same for Linux/macOS
 ├── experiments/           # Phase 6 model-improvement studies (offline, not in serving)
 │   ├── error_analysis.py  # 6.1 where the model loses to persistence
 │   ├── feature_experiments.py # 6.2 leakage-guarded feature candidates
@@ -38,7 +45,8 @@ Air-Quality-Forecasting/
 │   ├── model_comparison.py# 6.4 LGBM vs XGBoost vs Ridge vs SARIMAX
 │   └── multi_horizon.py   # 6.6 +1/+2/+3-day forecasts (stretch)
 ├── .github/workflows/
-│   └── retrain.yml         # Weekly cron + manual retrain, commits model back
+│   ├── ci.yml              # Lint + tests on every push/PR (no network)
+│   └── retrain.yml         # Weekly: fetch → drift-check → validate+train → gate → commit
 ├── models/
 │   └── model.joblib            (committed; point + p10/p50/p90 quantile models)
 ├── mlruns/                     # MLflow local tracking store (gitignored; uploaded as CI artifact)
@@ -48,7 +56,10 @@ Air-Quality-Forecasting/
     ├── metrics.json            (generated)
     ├── results.md              (generated)
     ├── shap_summary.png        (generated)
-    └── pm25_timeseries.png     (generated)
+    ├── pm25_timeseries.png     (generated)
+    ├── feature_reference.json  (generated — training-time feature distributions for drift checks)
+    ├── drift_report.md / .json (generated — latest drift-check outcome)
+    └── backtest.md / .json / backtest_mae.png  (generated — walk-forward backtest)
 ```
 
 ## Quick Start
@@ -215,10 +226,32 @@ export MLFLOW_TRACKING_URI="databricks"
 
 In CI, set it as the repository variable **`MLFLOW_TRACKING_URI`** (Settings →
 Secrets and variables → Actions → Variables); the retrain workflow already
-passes it through. When a remote store is used you can stop committing
-`mlruns/` and remove it from the retrain commit step.
+passes it through — and, when it is set, also registers each new model in the
+server's **Model Registry** and promotes it after the quality gate (see
+below). `mlruns/` itself is never committed (the file store embeds absolute
+paths); without a remote server it is uploaded as a CI build artifact.
 
-### Automated retraining (GitHub Actions)
+#### Running a persistent tracking server (enables the Model Registry)
+
+The plain `mlruns/` file store has no Model Registry.  The included helper
+starts a **SQLite-backed** MLflow server locally — registry-capable, and runs
+persist across reclones because they live in `mlflow.db` (gitignored), not in
+the repo:
+
+```bash
+./scripts/start_mlflow_server.sh          # Linux/macOS
+# .\scripts\start_mlflow_server.ps1       # Windows
+# then, in another shell:
+export MLFLOW_TRACKING_URI="http://127.0.0.1:5000"
+python -m src.train
+```
+
+For CI you need a server GitHub's runners can reach: self-host the same
+command on any box (put it behind auth!), or use a managed backend (DagsHub,
+Databricks, Azure ML — all speak the MLflow tracking protocol), and set the
+`MLFLOW_TRACKING_URI` repo variable to it.
+
+### Automated retraining (GitHub Actions) — with safety rails
 
 [`.github/workflows/retrain.yml`](.github/workflows/retrain.yml) retrains the
 model on a schedule and on demand:
@@ -228,18 +261,104 @@ model on a schedule and on demand:
   from it).
 - **Manual** — the *Run workflow* button (`workflow_dispatch`).
 
-Each run sets up Python, installs `requirements.txt`, prints the run
-configuration (city / dates / schedule read from `config.py`), runs
-`python -m src.train` end-to-end, and **commits the refreshed
-`models/model.joblib`, `reports/`, and `mlruns/` back to the branch** — but only
-if something actually changed, so re-runs don't create empty commits. The
-commit message carries `[skip ci]` to avoid retrigger loops.
+Each run walks a gated pipeline — a bad week's data or a regressed model
+**cannot** silently replace the serving model:
 
-The workflow needs `contents: write` permission (already declared) so the
-`github-actions[bot]` can push. If you'd rather **not** commit binaries back,
-swap the final commit step for an
-[`actions/upload-artifact`](https://github.com/actions/upload-artifact) step to
-publish the model + reports as downloadable build artifacts instead.
+1. **Snapshot the champion** — the committed `reports/metrics.json` is stashed
+   for the later comparison.
+2. **Fetch fresh data** (`python -m src.build_dataset`).
+3. **Drift check** (`python -m src.drift`) — scores the new data against the
+   previous run's feature reference profile and the committed model's recent
+   prediction error. Drift never blocks the retrain, but it **opens (or
+   updates) a GitHub issue** labelled `drift` with the full report.
+4. **Validate + train** (`python -m src.train --use-cached`) — training first
+   runs `src/validate.py` (schema, physical ranges, row count, index
+   integrity) and **fails the job loudly** on any violation.
+5. **Champion/challenger gate** (`python -m src.promotion_gate`) — the new
+   model's held-out test MAE is compared to the champion's. If it regressed
+   by more than `config.PROMOTION_MAX_MAE_REGRESSION_PCT` (default 5%), the
+   job **fails and nothing is committed** — the old model keeps serving. The
+   verdict is written to the run's step summary.
+6. **Registry promotion** — when a remote `MLFLOW_TRACKING_URI` is configured,
+   the newly registered model version is promoted from `@staging` to
+   `@production` (`python -m src.registry promote`).
+7. **Commit** the refreshed `models/model.joblib` + `reports/` back to the
+   branch — only if something actually changed. The commit message carries
+   `[skip ci]` to avoid retrigger loops.
+
+The workflow needs `contents: write` (push) and `issues: write` (drift
+alerts) permissions — both declared in the workflow.
+
+### Data validation (before every training run)
+
+`src/validate.py` gates every training run: required raw columns present,
+≥ `config.MIN_TRAINING_ROWS` rows, sorted/unique dates with no gap larger
+than `config.MAX_DATE_GAP_DAYS`, per-column NaN budget, physical ranges
+(PM2.5 within 0–500 µg/m³, humidity 0–100%, …), and a degenerate-feed check
+(constant PM2.5 means the upstream API broke). All violations are reported
+in a single `DataValidationError`. Run it standalone against the cached
+parquet:
+
+```bash
+python -m src.validate
+```
+
+### Drift monitoring
+
+`src/drift.py` watches for the world changing under the model:
+
+- **Feature drift** — at training time a *reference profile* of every
+  feature's distribution is saved (`reports/feature_reference.json`). The
+  check bins the most recent `config.DRIFT_WINDOW_DAYS` days with the same
+  edges and computes the **Population Stability Index** per feature. The
+  reference is **month-conditional** (a monsoon June is compared with
+  previous Junes, not the all-year distribution), which keeps the strongly
+  seasonal PM2.5 series from tripping the alarm every season.
+- **Prediction-error drift** — the committed model's MAE over the recent
+  window vs its committed held-out test MAE (alert above
+  `config.DRIFT_ERROR_RATIO_ALERT`×).
+
+Exit code 1 (drift) makes the CI workflow file a GitHub issue; the report
+lands in `reports/drift_report.md`.
+
+### Model Registry (MLflow)
+
+With a registry-capable tracking backend configured (see the server section
+above), every training run registers its model under
+`config.MLFLOW_REGISTERED_MODEL_NAME` with the **`@staging`** alias; the CI
+gate promotes it to **`@production`**. Serving can then load straight from
+the registry instead of the committed file:
+
+```bash
+export MLFLOW_TRACKING_URI="http://127.0.0.1:5000"
+export MODEL_SOURCE=registry          # default: "local" (models/model.joblib)
+uvicorn src.api:app --port 8000
+```
+
+`python -m src.registry status` lists versions and aliases;
+`python -m src.registry promote` moves `@production` to the current staging
+version. Without a registry backend everything degrades gracefully to the
+committed `models/model.joblib`, so the repo still works with zero
+infrastructure.
+
+### Walk-forward backtesting
+
+The headline metrics come from a single 90-day held-out window — one draw
+from a noisy distribution. `python -m src.backtest` replays history the way
+production actually runs: train on the first year, forecast the next 30
+days, roll forward, retrain, repeat. Every prediction is out-of-sample, and
+the persistence/seasonal-naive baselines are computed on identical windows.
+Results land in `reports/backtest.md` / `.json` / `backtest_mae.png`.
+
+Honest headline from the current data (24 folds, 693 predictions): pooled
+model MAE **4.23 vs persistence 4.16** (−1.7%), beating persistence in 11 of
+24 folds, with RMSE slightly *better* than persistence (5.82 vs 5.90). The
+single 90-day test window's +4.5% MAE was the optimistic end of the
+distribution — over the whole history the point-forecast gap to persistence
+is essentially zero, consistent with the Phase 6 finding that next-day PM2.5
+in Colombo is dominated by its lag-1 autocorrelation. The model's value-add
+is the ~44% win over seasonal-naive, slightly better RMSE (fewer large
+misses), and calibrated prediction intervals — not a large average-MAE win.
 
 ## Changing the Target City
 
