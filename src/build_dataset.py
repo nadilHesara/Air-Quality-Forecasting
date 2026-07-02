@@ -4,10 +4,11 @@ Build the daily training dataset for PM2.5 next-day forecasting.
 Orchestrates the full pipeline:
 1. Fetch daily weather + air-quality data via Open-Meteo.
 2. Inner-join on ``date``.
-3. Engineer lag / rolling / calendar features.
-4. Create the prediction target (next-day PM2.5).
-5. Drop rows with NaN values introduced by shifting/rolling.
-6. Save to ``data/training_data.parquet``.
+3. Engineer features + create the target using :mod:`src.features` — the
+   **single source of truth** shared with training and serving, so this
+   module never grows its own (drifting) copy of the feature logic.
+4. Drop rows with NaN values introduced by shifting/rolling.
+5. Save to ``data/training_data.parquet``.
 
 Run directly::
 
@@ -25,10 +26,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 
+import config  # noqa: E402  (after sys.path manipulation)
+from src.features import TARGET_COLUMN, add_target, make_features
+
 # ── Sibling modules ──────────────────────────────────────────────────────────
 from src.fetch_air_quality import fetch_daily_air_quality
 from src.fetch_weather import fetch_daily_weather
-import config  # noqa: E402  (after sys.path manipulation)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,62 +42,37 @@ logger = logging.getLogger(__name__)
 
 
 # ── Feature engineering ──────────────────────────────────────────────────────
+# NOTE: feature/target logic deliberately lives in :mod:`src.features` (the one
+# place shared by training and serving).  We only assemble the persisted table
+# here; there is no second copy to drift out of sync.
 
 
-def add_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add lag, rolling, and calendar features in-place.
+def assemble_dataset(raw: pd.DataFrame) -> pd.DataFrame:
+    """Combine the raw joined table with the engineered features + target.
 
-    New columns created:
-
-    * ``pm25_lag1``      – previous day's mean PM2.5
-    * ``pm25_rolling7``  – 7-day rolling mean of PM2.5
-    * ``day_of_week``    – 0 (Mon) … 6 (Sun)
-    * ``month``          – 1 … 12
+    Uses :func:`src.features.make_features` and :func:`src.features.add_target`
+    so the columns written to ``training_data.parquet`` match exactly what the
+    model sees at training and inference time.  Raw pollution/weather columns
+    are kept alongside the engineered features (the baselines in
+    ``src/train.py`` read raw ``pm2_5_mean`` directly).
 
     Parameters
     ----------
-    df : pd.DataFrame
-        Must contain ``pm2_5_mean`` and a ``DatetimeIndex`` named ``date``.
+    raw : pd.DataFrame
+        Weather + air-quality table joined on ``date`` (DatetimeIndex).
 
     Returns
     -------
     pd.DataFrame
-        The same DataFrame with added feature columns.
+        ``raw`` columns + the engineered feature columns + ``pm25_next_day``.
     """
-    df = df.copy()
-
-    # Lag features
-    df["pm25_lag1"] = df["pm2_5_mean"].shift(1)
-
-    # Rolling statistics
-    df["pm25_rolling7"] = df["pm2_5_mean"].rolling(window=7, min_periods=7).mean()
-
-    # Calendar features
-    df["day_of_week"] = df.index.dayofweek  # type: ignore[union-attr]
-    df["month"] = df.index.month  # type: ignore[union-attr]
-
-    return df
-
-
-def add_target(df: pd.DataFrame) -> pd.DataFrame:
-    """Create the prediction target: next-day average PM2.5.
-
-    The target ``pm25_next_day`` is the PM2.5 mean shifted backward by 1 row,
-    meaning each row's target is *tomorrow's* PM2.5 value.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Must contain ``pm2_5_mean``.
-
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame with an added ``pm25_next_day`` column.
-    """
-    df = df.copy()
-    df["pm25_next_day"] = df["pm2_5_mean"].shift(-1)
-    return df
+    features = make_features(raw)
+    # Only add engineered columns that aren't already in ``raw`` (make_features
+    # re-emits the raw pollution/weather columns; keep the originals once).
+    new_cols = [c for c in features.columns if c not in raw.columns]
+    combined = raw.join(features[new_cols], how="left")
+    combined[TARGET_COLUMN] = add_target(raw)
+    return combined
 
 
 # ── Main pipeline ────────────────────────────────────────────────────────────
@@ -140,9 +118,8 @@ def build_training_dataset() -> pd.DataFrame:
         len(aq_df),
     )
 
-    # 3. Feature engineering --------------------------------------------------
-    df = add_features(df)
-    df = add_target(df)
+    # 3. Feature engineering (delegated to src.features — single source) ------
+    df = assemble_dataset(df)
 
     # 4. Handle missing values ------------------------------------------------
     rows_before = len(df)

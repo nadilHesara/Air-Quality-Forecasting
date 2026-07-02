@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -93,7 +93,7 @@ class PredictionResult:
 
 
 def _today_utc() -> date:
-    return datetime.now(timezone.utc).date()
+    return datetime.now(UTC).date()
 
 
 def load_model(model_path: Path = MODEL_PATH) -> dict[str, Any]:

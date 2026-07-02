@@ -1,0 +1,27 @@
+# Pre-commit hooks: catch lint / whitespace issues before they reach CI.
+#
+# One-time setup (after `pip install -r requirements-dev.txt`):
+#     pre-commit install
+# Run against all files on demand:
+#     pre-commit run --all-files
+#
+# These hooks mirror the CI checks, so if pre-commit is green the CI lint step
+# will be too. Ruff's config is read from pyproject.toml.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.20
+    hooks:
+      # Lint with autofix. (We run only the linter, not `ruff-format`, to match
+      # the CI lint step and avoid reformatting the existing hand-aligned code.)
+      - id: ruff
+        args: [--fix]

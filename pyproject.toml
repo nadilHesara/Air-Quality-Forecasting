@@ -1,0 +1,38 @@
+# Project tooling configuration (pytest + ruff).
+#
+# There is no build step or package to install — this file exists purely to
+# configure the developer tooling in one place, so `pytest` and `ruff` behave
+# identically on a laptop and in CI.
+
+[tool.pytest.ini_options]
+# Where the tests live and how they're discovered.
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+# -ra prints a short summary of anything not-passed; --strict-markers catches
+# typos in @pytest.mark names instead of silently ignoring them.
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+# Match the Python version the pipeline targets (CI uses 3.12).
+target-version = "py312"
+# 120 (not the stricter 88/100) keeps the existing readable log/f-string lines
+# and Markdown-in-Python report builders intact without reflowing them.
+line-length = 120
+# Never lint the vendored virtualenv or generated artefacts.
+extend-exclude = [".venv", "mlruns", "data", "models", "reports"]
+
+[tool.ruff.lint]
+# A pragmatic, beginner-friendly rule set:
+#   E/W  pycodestyle (style)      F  pyflakes (real bugs: unused imports, etc.)
+#   I    import sorting           UP pyupgrade (modernize syntax)
+#   B    flake8-bugbear (footguns)
+select = ["E", "W", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Several modules deliberately call `sys.path.insert(...)` before importing
+# `config` / sibling modules so they run both as `python -m src.x` and directly.
+# That trips E402 (import not at top of file); it's intentional here.
+"src/*.py" = ["E402"]
+"tests/conftest.py" = ["E402"]
+"config.py" = ["E402"]

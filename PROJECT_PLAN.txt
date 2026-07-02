@@ -1,0 +1,264 @@
+================================================================================
+ PM2.5 AIR-QUALITY FORECASTING — PROJECT PLAN & ROADMAP
+================================================================================
+ Project : Next-day PM2.5 forecasting for Colombo, Sri Lanka (re-targetable)
+ Author  : nadilHesara
+ Rebuilt : 2026-07-02  (reconstructed from codebase after original plan lost)
+ Repo    : Air-Quality-Forecasting  (branch: main)
+
+--------------------------------------------------------------------------------
+ HOW TO USE THIS DOCUMENT
+--------------------------------------------------------------------------------
+ - Phases 0-4 are ALREADY DONE (this is the current state of the repo).
+ - Phases 5+ are the SUGGESTED NEXT STEPS, ordered by value / effort.
+ - Each phase lists: Goal, Tasks, and "Done when" acceptance criteria.
+ - Tackle phases roughly in order; within a phase, tasks are independent
+   unless noted. Check items off as [x] as you complete them.
+
+
+================================================================================
+ PART A — WHAT IS ALREADY BUILT  (current state, verified 2026-07-02)
+================================================================================
+
+ The project is a working end-to-end ML pipeline. A single command
+ (`python -m src.train`) goes from raw data to a trained, evaluated, and
+ tracked model. A serving layer (API + dashboard) reuses the exact same
+ feature code, and a GitHub Actions workflow retrains weekly.
+
+ CURRENT HEADLINE METRICS (reports/metrics.json):
+   - Model (LightGBM), held-out 90-day test:  MAE 3.31 | RMSE 4.53
+   - Persistence baseline:                     MAE 3.47 | RMSE 4.90
+   - Seasonal-naive baseline:                  MAE 5.43 | RMSE 6.96
+   - Improvement vs persistence:  +4.5% MAE   (NOTE: this is small — see Phase 6)
+   - Improvement vs seasonal-naive: +39% MAE
+   - Data: 1,059 supervised rows, 26 features, 2023-07-20 → 2026-06-12
+
+ [x] PHASE 0 — Project scaffolding & config
+     - Central config.py (city, lat/lon, dates, API URLs, CV knobs, MLflow,
+       retrain cron). Single source of truth; change city in one place.
+
+ [x] PHASE 1 — Data ingestion
+     - src/fetch_weather.py       : Open-Meteo historical weather (daily).
+     - src/fetch_air_quality.py   : Open-Meteo air quality (hourly→daily).
+     - src/build_dataset.py       : join on date, save training parquet.
+     - APIs are free, no key required.
+
+ [x] PHASE 2 — Feature engineering (leakage-safe)
+     - src/features.py is the SINGLE SOURCE OF TRUTH for features, shared by
+       training AND serving so production inputs can't drift.
+     - 26 features: pollution context, 6 weather vars, PM lags (1/2/3/7/14),
+       rolling mean+std (3/7/14/30), day-over-day diff, calendar features.
+     - Documented leakage guarantee (all features use only info up to day t).
+
+ [x] PHASE 3 — Training, validation & evaluation
+     - src/train.py: one reproducible entry point (fetch→features→split→
+       baselines→time-series CV→refit→evaluate once→persist→track).
+     - Chronological split, expanding-window TimeSeriesSplit (no shuffling).
+     - Two baselines (persistence, seasonal-naive) + % improvement.
+     - Outputs: models/model.joblib, reports/metrics.json, results.md,
+       shap_summary.png.
+
+ [x] PHASE 4 — Serving & MLOps
+     - src/inference.py : shared serving path (live fetch → features → predict).
+     - src/api.py       : FastAPI (/health, /predict).
+     - src/dashboard.py : Streamlit (headline metric + 30-day chart).
+     - MLflow experiment tracking (local file store, params/metrics/artifacts).
+     - .github/workflows/retrain.yml : weekly cron + manual retrain, commits
+       refreshed model/reports, uploads mlruns/ as artifact, cron-drift guard.
+
+
+================================================================================
+ PART B — KNOWN GAPS & TECH DEBT  (fix opportunistically)
+================================================================================
+
+ These are real issues found in the current code. Several are addressed by the
+ phases below, but list them here so they aren't forgotten:
+
+ (D1) DEAD/DUPLICATE FEATURE CODE — HIGH PRIORITY CLEANUP.
+      src/build_dataset.py still defines its OWN add_features()/add_target()
+      with only the OLD 4 features (pm25_lag1, pm25_rolling7, day_of_week,
+      month). Training no longer uses them (train.py calls features.py's
+      build_supervised), so this code is misleading and can rot. Either delete
+      these functions from build_dataset.py (keep only the fetch+join+save) or
+      make build_dataset import from features.py. The README "Engineered
+      Features" table also still lists the OLD 4 features — update it to match
+      the real 26 in features.py.
+
+ (D2) NO AUTOMATED TESTS. There is zero test coverage. The leakage guarantee,
+      feature/column alignment, and baseline math are all asserted only by
+      hand. This is the single biggest risk. See Phase 5.
+
+ (D3) NO CI FOR CODE QUALITY. The only workflow is retrain.yml. No linting,
+      no test run on push/PR. See Phase 5.
+
+ (D4) MODEL BARELY BEATS PERSISTENCE (+4.5% MAE). For a portfolio/production
+      story this is thin. Needs error analysis + tuning (Phase 6) or honest
+      framing ("persistence is a strong baseline for next-day PM2.5").
+
+ (D5) NO REPRODUCIBLE ENV PIN. requirements.txt uses >= ranges only; no lock
+      file. CI could silently break on a dependency bump. See Phase 5.
+
+ (D6) NO INPUT/DRIFT MONITORING. Retraining is blind — no check that new data
+      is sane or that model quality hasn't regressed before committing. Phase 7.
+
+ (D7) SECRETS/ENV NOT DOCUMENTED for deployment; no Dockerfile. Phase 8.
+
+
+================================================================================
+ PART C — ROADMAP  (suggested next steps, in priority order)
+================================================================================
+
+--------------------------------------------------------------------------------
+ PHASE 5 — HARDENING: tests, cleanup & quality CI      [START HERE]
+--------------------------------------------------------------------------------
+ GOAL: Make the pipeline trustworthy and safe to change. Highest value for the
+       least effort; unblocks everything else.
+
+ TASKS:
+   [ ] 5.1  Remove duplicate feature logic (fixes D1): strip add_features/
+            add_target from build_dataset.py OR delegate to features.py.
+   [ ] 5.2  Update README "Engineered Features" table to the real 26 features.
+   [ ] 5.3  Add a tests/ package with pytest. Minimum coverage:
+              - Leakage test: build a synthetic ramp series, assert no feature
+                on day t depends on any value from day > t.
+              - Alignment test: list(make_features(df).columns) == feature_names().
+              - build_supervised has no NaNs in X or y; X/y indices aligned.
+              - Baseline sanity: persistence & seasonal-naive on a tiny fixture
+                return the mathematically expected values.
+              - Inference smoke test: monkeypatch the fetch functions to return
+                a canned frame; assert predict_next_day() yields one finite
+                number and prediction_date == feature_date + 1 day.
+              - API test: FastAPI TestClient hits /health and /predict (mock
+                inference) → 200 with the expected schema.
+   [ ] 5.4  Add requirements-dev.txt (pytest, ruff/flake8, httpx for TestClient).
+   [ ] 5.5  Add .github/workflows/ci.yml: on push/PR → install, ruff lint,
+            pytest. Keep it fast (mock all network).
+   [ ] 5.6  Pin dependencies (fixes D5): generate a lock (pip freeze →
+            requirements.lock, or move to uv/poetry) so CI is reproducible.
+   [ ] 5.7  Add pre-commit config (ruff + trailing whitespace) — optional but
+            cheap.
+
+ DONE WHEN: `pytest` passes locally and in CI on every push; no duplicate
+            feature code remains; README matches the code.
+
+
+--------------------------------------------------------------------------------
+ PHASE 6 — MODEL IMPROVEMENT: beat persistence convincingly
+--------------------------------------------------------------------------------
+ GOAL: Move the model meaningfully past the persistence baseline (currently
+       only +4.5% MAE), or prove that gap is intrinsic and frame it honestly.
+
+ TASKS:
+   [ ] 6.1  Error analysis: plot residuals over time, by month/season, and vs
+            actual PM2.5 level. Where does the model lose to persistence?
+            (Likely: it under-predicts sharp spikes.) Save to reports/.
+   [ ] 6.2  Feature experiments (guard each with the leakage test from 5.3):
+              - Wind direction as sin/cos instead of raw degrees.
+              - Interaction: humidity × precipitation; pressure change.
+              - Longer/short lags; PM10-to-PM2.5 ratio; lagged weather.
+              - Cyclical calendar encoding (month/day_of_year as sin/cos).
+   [ ] 6.3  Hyperparameter tuning: proper time-series CV search (Optuna or
+            sklearn) on the TRAIN POOL ONLY. Never touch the held-out test set.
+            Log the study to MLflow.
+   [ ] 6.4  Try alternative / ensemble models for comparison: quantile LGBM
+            (for uncertainty), XGBoost, a simple ridge on lags, maybe a small
+            SARIMAX baseline. Compare fairly in the existing metrics table.
+   [ ] 6.5  Prediction intervals: switch to quantile regression (e.g. LGBM
+            with objective='quantile' at 0.1/0.5/0.9) so the API/dashboard can
+            show a range, not just a point.
+   [ ] 6.6  Multi-horizon: extend from next-day to +1/+2/+3 day forecasts
+            (either separate models or a recursive strategy). Optional/stretch.
+
+ DONE WHEN: A documented experiment (in results.md / MLflow) shows either a
+            clear MAE improvement over persistence, or a written justification
+            that the remaining gap is intrinsic — plus prediction intervals
+            available in the serving output.
+
+
+--------------------------------------------------------------------------------
+ PHASE 7 — MLOps MATURITY: monitoring, validation & model registry
+--------------------------------------------------------------------------------
+ GOAL: Make automated retraining safe and observable — don't blindly commit a
+       worse model.
+
+ TASKS:
+   [ ] 7.1  Data validation before training: schema + range checks on the fetched
+            frame (row count, no all-NaN columns, PM2.5 within sane bounds,
+            dates monotonic). Fail the run loudly on violation. (pandera or a
+            hand-rolled validate() step.)
+   [ ] 7.2  Champion/challenger gate in retrain.yml: after training, compare new
+            test MAE to the previous committed metrics.json. Only commit the new
+            model if it's within tolerance / not worse by more than X%. Otherwise
+            fail the job and keep the old model.
+   [ ] 7.3  MLflow Model Registry: register models with stages (Staging/Prod)
+            instead of committing model.joblib to git. Serving loads the current
+            Prod model. (Requires a persistent tracking server — see 7.5.)
+   [ ] 7.4  Drift monitoring: log rolling input-feature distributions and recent
+            live-vs-actual prediction error; alert (or open an issue) on drift.
+   [ ] 7.5  Stand up a persistent MLflow tracking server (or managed backend)
+            and set MLFLOW_TRACKING_URI in CI so runs aren't ephemeral. Then
+            stop committing mlruns/ (README already documents this path).
+   [ ] 7.6  Backtesting harness: walk-forward evaluation across the whole
+            history (retrain at each step) for a robust performance estimate,
+            not just the single 90-day window.
+
+ DONE WHEN: A retrain that produces a worse model does NOT get promoted; input
+            data is validated; model provenance lives in a registry, not git.
+
+
+--------------------------------------------------------------------------------
+ PHASE 8 — DEPLOYMENT & PACKAGING
+--------------------------------------------------------------------------------
+ GOAL: Make the API + dashboard runnable by anyone / hostable.
+
+ TASKS:
+   [ ] 8.1  Dockerfile for the API (uvicorn) and a compose file that also runs
+            the Streamlit dashboard. Multi-stage build; pinned deps.
+   [ ] 8.2  Deploy the API to a free/cheap host (Fly.io / Render / Railway /
+            HF Spaces) and the dashboard to Streamlit Community Cloud.
+   [ ] 8.3  Config via environment variables (12-factor): allow overriding city/
+            lat/lon/tracking URI at runtime without editing config.py.
+   [ ] 8.4  Add /predict caching + basic rate limiting; graceful handling when
+            the upstream Open-Meteo API is down.
+   [ ] 8.5  Health/readiness probes wired for the host; structured JSON logging.
+   [ ] 8.6  (Optional) A small scheduled job that stores each day's prediction
+            so you can later chart predicted-vs-actual over time.
+
+ DONE WHEN: A public URL serves live predictions and a hosted dashboard renders
+            them, reproducibly from a container.
+
+
+--------------------------------------------------------------------------------
+ PHASE 9 — PRODUCT & POLISH  (portfolio value)
+--------------------------------------------------------------------------------
+ GOAL: Tell the story well and make it multi-city.
+
+ TASKS:
+   [ ] 9.1  Dashboard upgrades: predicted-vs-actual history, prediction
+            intervals band, AQI category + health guidance, SHAP explanation
+            for today's prediction ("why this number").
+   [ ] 9.2  Multi-city: parameterize the whole pipeline over a list of cities;
+            city selector in the dashboard; one model per city (or a global
+            model with city features).
+   [ ] 9.3  Write-up: a short blog/README section on method, honesty about the
+            persistence baseline, and results — with charts.
+   [ ] 9.4  Add a LICENSE, CONTRIBUTING note, and architecture diagram.
+   [ ] 9.5  (Stretch) Alerting: email/push when tomorrow's PM2.5 is predicted
+            to cross an unhealthy AQI threshold.
+
+ DONE WHEN: The repo reads as a polished, explained, multi-city product.
+
+
+================================================================================
+ SUGGESTED IMMEDIATE ACTIONS (next 1-2 sessions)
+================================================================================
+   1. Phase 5.1 + 5.2 — kill the duplicate feature code in build_dataset.py and
+      fix the README feature table (quick, removes real confusion).
+   2. Phase 5.3 + 5.5 — add pytest tests (esp. the leakage & alignment tests)
+      and a CI workflow. This protects every future change.
+   3. Phase 6.1 — do the error analysis so you KNOW whether beating persistence
+      is realistic before investing in tuning.
+
+================================================================================
+ END OF PLAN
+================================================================================

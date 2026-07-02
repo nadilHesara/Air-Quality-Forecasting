@@ -39,8 +39,8 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 import config  # noqa: E402
 from src.inference import (  # noqa: E402
-    ModelNotFoundError,
     MODEL_PATH,
+    ModelNotFoundError,
     load_model,
     model_version,
     predict_next_day,

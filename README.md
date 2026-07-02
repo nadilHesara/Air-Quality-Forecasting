@@ -120,9 +120,9 @@ PM2.5 with the latest prediction overlaid.
 
 ## Output
 
-- **`data/training_data.parquet`** — ~1 090 rows × 13 columns.  Each row is
-  one day with weather features, air-quality features, engineered lag/rolling
-  features, and the target (`pm25_next_day`).
+- **`data/training_data.parquet`** — ~1 060 rows × 27 columns.  Each row is
+  one day with the raw weather + air-quality columns, the 26 engineered
+  features (lags, rolling stats, calendar), and the target (`pm25_next_day`).
 
 - **`reports/pm25_timeseries.png`** — time-series plot of daily PM2.5 with a
   30-day rolling-mean overlay for eyeballing seasonality.
@@ -222,10 +222,51 @@ Then re-run `python -m src.train`.
 
 ## Engineered Features
 
+All features are built by `src/features.py` (`make_features`), the **single
+source of truth** used identically at training and serving time.  There are
+**26 features** in four groups, plus the target.  Every feature for day *t* uses
+only information available up to and including day *t* (lags use `shift(k≥1)`;
+rolling windows are trailing / non-centred), so there is no leakage — see the
+leakage guarantee at the top of `src/features.py`.
+
+**Pollution context (today, day *t*)**
+
 | Feature | Description |
 |---------|-------------|
-| `pm25_lag1` | Previous day's mean PM2.5 |
-| `pm25_rolling7` | 7-day rolling mean PM2.5 |
+| `pm2_5_mean` | Today's mean PM2.5 (µg/m³) |
+| `pm10_mean` | Today's mean PM10 (µg/m³) |
+
+**Weather (today, day *t*)**
+
+| Feature | Description |
+|---------|-------------|
+| `temperature_2m_mean` | Daily mean 2 m air temperature |
+| `wind_speed_10m_max` | Daily max 10 m wind speed |
+| `wind_direction_10m_dominant` | Dominant 10 m wind direction (degrees) |
+| `relative_humidity_2m_mean` | Daily mean 2 m relative humidity |
+| `precipitation_sum` | Daily total precipitation |
+| `surface_pressure_mean` | Daily mean surface pressure |
+
+**Lagged & rolling PM2.5 (past only)**
+
+| Feature | Description |
+|---------|-------------|
+| `pm25_lag1`, `pm25_lag2`, `pm25_lag3`, `pm25_lag7`, `pm25_lag14` | PM2.5 from *k* days ago (1/2/3/7/14; 7 = same weekday last week) |
+| `pm25_rolling3_mean`, `pm25_rolling7_mean`, `pm25_rolling14_mean`, `pm25_rolling30_mean` | Trailing rolling mean of PM2.5 over 3/7/14/30 days |
+| `pm25_rolling3_std`, `pm25_rolling7_std`, `pm25_rolling14_std`, `pm25_rolling30_std` | Trailing rolling std of PM2.5 over 3/7/14/30 days |
+| `pm25_diff1` | Day-over-day change: yesterday's PM2.5 minus the day before |
+
+**Calendar**
+
+| Feature | Description |
+|---------|-------------|
 | `day_of_week` | 0 (Monday) – 6 (Sunday) |
 | `month` | 1 – 12 |
-| `pm25_next_day` | **Target** — next day's mean PM2.5 |
+| `day_of_year` | 1 – 366 |
+| `is_weekend` | 1 if Saturday/Sunday, else 0 |
+
+**Target**
+
+| Column | Description |
+|--------|-------------|
+| `pm25_next_day` | **Target** — next day's mean PM2.5 (the only future-looking column; produced by `add_target`, never used at inference) |

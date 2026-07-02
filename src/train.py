@@ -470,7 +470,8 @@ def _write_results_md(metrics: dict) -> Path:
         "| Model | MAE | RMSE |",
         "|---|---:|---:|",
         f"| Persistence (today → tomorrow) | {b['persistence']['mae']:.3f} | {b['persistence']['rmse']:.3f} |",
-        f"| Seasonal-naive (same weekday last week) | {b['seasonal_naive']['mae']:.3f} | {b['seasonal_naive']['rmse']:.3f} |",
+        f"| Seasonal-naive (same weekday last week) | {b['seasonal_naive']['mae']:.3f} "
+        f"| {b['seasonal_naive']['rmse']:.3f} |",
         f"| **LightGBM** | **{m['mae']:.3f}** | **{m['rmse']:.3f}** |",
         "",
         "## Improvement of LightGBM over baselines",
