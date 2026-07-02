@@ -31,10 +31,16 @@ Air-Quality-Forecasting/
 │   └── dashboard.py        # Streamlit dashboard
 ├── scripts/
 │   └── eda.py              # Time-series plot of PM2.5
+├── experiments/           # Phase 6 model-improvement studies (offline, not in serving)
+│   ├── error_analysis.py  # 6.1 where the model loses to persistence
+│   ├── feature_experiments.py # 6.2 leakage-guarded feature candidates
+│   ├── tune_lgbm.py       # 6.3 Optuna HPO (logged to MLflow)
+│   ├── model_comparison.py# 6.4 LGBM vs XGBoost vs Ridge vs SARIMAX
+│   └── multi_horizon.py   # 6.6 +1/+2/+3-day forecasts (stretch)
 ├── .github/workflows/
 │   └── retrain.yml         # Weekly cron + manual retrain, commits model back
 ├── models/
-│   └── model.joblib            (committed; refreshed by src.train / retrain CI)
+│   └── model.joblib            (committed; point + p10/p50/p90 quantile models)
 ├── mlruns/                     # MLflow local tracking store (gitignored; uploaded as CI artifact)
 ├── data/
 │   └── training_data.parquet   (generated)
@@ -99,8 +105,9 @@ uvicorn src.api:app --reload --port 8000
 ```
 
 - `GET http://localhost:8000/health` — liveness/readiness (model present & loadable).
-- `GET http://localhost:8000/predict` — tomorrow's predicted PM2.5, the exact
-  input features, and a model version string.
+- `GET http://localhost:8000/predict` — tomorrow's predicted PM2.5 **with an 80%
+  prediction interval** (`pm25_lower` / `pm25_upper` / `interval_coverage`), the
+  exact input features, and a model version string.
 - Interactive docs: `http://localhost:8000/docs`
 
 Example:
@@ -115,8 +122,9 @@ curl http://localhost:8000/predict
 streamlit run src/dashboard.py
 ```
 
-Shows tomorrow's predicted PM2.5 and a chart of the last ~30 days of actual
-PM2.5 with the latest prediction overlaid.
+Shows tomorrow's predicted PM2.5 with its 80% prediction interval and a chart
+of the last ~30 days of actual PM2.5 with the latest prediction (and its
+lower/upper band) overlaid.
 
 ## Output
 
@@ -126,6 +134,33 @@ PM2.5 with the latest prediction overlaid.
 
 - **`reports/pm25_timeseries.png`** — time-series plot of daily PM2.5 with a
   30-day rolling-mean overlay for eyeballing seasonality.
+
+## Model Performance & Prediction Intervals
+
+On the held-out test the LightGBM point forecast beats persistence by **+4.5%
+MAE / +7.5% RMSE** and seasonal-naive by ~39%. That persistence gap is *small
+on purpose*: daily-mean PM2.5 has lag-1 autocorrelation ≈ **0.83**, so "tomorrow
+≈ today" is a genuinely strong baseline. The Phase 6 study
+([`reports/phase6_summary.md`](reports/phase6_summary.md)) shows that a linear
+model, XGBoost, and SARIMAX all land within a ~5% MAE band of each other and of
+persistence — the remaining gap is largely **intrinsic** to the series, not a
+modelling shortfall.
+
+The real value-add is honest **uncertainty**: the model ships three LightGBM
+quantile regressors (p10/p50/p90) with **split-conformal calibration**, so the
+80% band actually covers ~80% of held-out days (uncalibrated quantile LGBM
+under-covers at ~68%). `GET /predict` and the dashboard surface this range.
+
+Reproduce any study offline (needs `requirements-experiments.txt`):
+
+```bash
+pip install -r requirements.txt -r requirements-experiments.txt
+python -m experiments.error_analysis      # 6.1
+python -m experiments.feature_experiments  # 6.2
+python -m experiments.tune_lgbm            # 6.3  (logs to MLflow experiment pm25-hpo)
+python -m experiments.model_comparison     # 6.4
+python -m experiments.multi_horizon        # 6.6
+```
 
 ## MLOps — Experiment Tracking & Automated Retraining
 

@@ -1,3 +1,6 @@
+# Runtime: everything src/ (data pipeline, training, serving) and the CI
+# retrain workflow need.  The Phase 6 experiment-only extras (optuna, xgboost,
+# statsmodels) live in requirements-experiments.txt so production stays lean.
 pandas>=2.0
 requests>=2.28
 matplotlib>=3.7

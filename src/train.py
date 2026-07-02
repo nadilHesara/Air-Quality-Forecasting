@@ -78,6 +78,7 @@ logger = logging.getLogger(__name__)
 TEST_HORIZON_DAYS: int = config.TEST_HORIZON_DAYS  # ~3 months held-out test set
 N_CV_SPLITS: int = config.N_CV_SPLITS              # expanding-window folds
 RANDOM_STATE: int = config.RANDOM_STATE
+QUANTILE_LEVELS: tuple[float, ...] = config.QUANTILE_LEVELS  # p10 / p50 / p90
 
 MODELS_DIR: Path = config.MODELS_DIR
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -122,6 +123,127 @@ def _pct_improvement(baseline: float, model: float) -> float:
     if baseline == 0:
         return float("nan")
     return float((baseline - model) / baseline * 100.0)
+
+
+# ── Quantile / prediction-interval helpers ─────────────────────────────────────
+def _pinball_loss(y_true: np.ndarray, y_pred: np.ndarray, alpha: float) -> float:
+    """Mean pinball (quantile) loss at level ``alpha`` — the proper score for a
+    quantile forecast (lower is better)."""
+    diff = y_true - y_pred
+    return float(np.mean(np.maximum(alpha * diff, (alpha - 1.0) * diff)))
+
+
+def train_quantile_models(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    levels: tuple[float, ...] = QUANTILE_LEVELS,
+    *,
+    calib_frac: float = 0.2,
+) -> tuple[dict[float, LGBMRegressor], dict[float, float]]:
+    """Fit LightGBM quantile regressors and conformalize them for calibration.
+
+    Vanilla LightGBM quantile regression on ~1k rows systematically produces
+    intervals that are **too tight** (empirical coverage well below nominal).
+    We fix this with split-conformal calibration (Conformalized Quantile
+    Regression, Romano et al. 2019), which keeps the intervals *honest* without
+    ever touching the held-out test set:
+
+    1. Split the train pool chronologically into a proper-train head and a
+       calibration tail (the most recent ``calib_frac``).
+    2. Fit one quantile model per ``alpha`` on the proper-train head only.
+    3. On the calibration tail, measure how far actuals fall outside each
+       quantile prediction (the conformity score) and take the appropriate
+       empirical quantile of those scores as a per-level **offset**.
+    4. Refit each quantile model on the *full* train pool (so production uses
+       all data) and return it alongside its calibration offset.
+
+    Returns ``(models, offsets)`` where ``offsets[alpha]`` is added to (upper
+    levels) or subtracted from (lower levels) that quantile's raw prediction to
+    widen the band to nominal coverage.  The median (0.5) offset is 0.
+    """
+    n = len(X_train)
+    n_cal = max(int(round(n * calib_frac)), N_CV_SPLITS)
+    head = slice(0, n - n_cal)
+    tail = slice(n - n_cal, n)
+    X_head, y_head = X_train.iloc[head], y_train.iloc[head]
+    X_cal, y_cal = X_train.iloc[tail], y_train.iloc[tail]
+
+    offsets: dict[float, float] = {}
+    for alpha in levels:
+        params = {**LGBM_PARAMS, "objective": "quantile", "alpha": alpha}
+        # Fit on the head to score conformity on the untouched calibration tail.
+        cal_model = LGBMRegressor(**params)
+        cal_model.fit(X_head, y_head)
+        cal_pred = cal_model.predict(X_cal)
+
+        if alpha == 0.5:
+            offsets[alpha] = 0.0
+            continue
+        # Conformity score = signed shortfall of the raw quantile.  For an
+        # upper quantile we want the (alpha)-quantile of (actual - pred) that
+        # keeps `actual <= pred + offset` for the nominal fraction; symmetric
+        # for a lower quantile.  Clip at 0 so calibration only ever widens.
+        if alpha > 0.5:
+            scores = np.asarray(y_cal) - cal_pred          # positive where under
+            offsets[alpha] = float(max(np.quantile(scores, alpha), 0.0))
+        else:
+            scores = cal_pred - np.asarray(y_cal)          # positive where over
+            offsets[alpha] = float(max(np.quantile(scores, 1.0 - alpha), 0.0))
+
+    # Refit each level on the FULL train pool for the shipped model.
+    models: dict[float, LGBMRegressor] = {}
+    for alpha in levels:
+        params = {**LGBM_PARAMS, "objective": "quantile", "alpha": alpha}
+        qm = LGBMRegressor(**params)
+        qm.fit(X_train, y_train)
+        models[alpha] = qm
+    return models, offsets
+
+
+def predict_quantiles(
+    quantile_models: dict[float, LGBMRegressor],
+    X: pd.DataFrame,
+    offsets: dict[float, float] | None = None,
+) -> dict[float, np.ndarray]:
+    """Predict every quantile, apply calibration offsets, enforce monotonicity.
+
+    ``offsets`` (from :func:`train_quantile_models`) widen the raw quantiles to
+    their nominal coverage: lower levels shift down, upper levels shift up.
+    Independently-fit models can still cross on a row, so we sort each row's
+    quantiles ascending to guarantee ``p_low <= ... <= p_high``.
+    """
+    levels = sorted(quantile_models)
+    cols = []
+    for a in levels:
+        pred = quantile_models[a].predict(X)
+        if offsets is not None:
+            off = offsets.get(a, 0.0)
+            pred = pred - off if a < 0.5 else pred + off
+        cols.append(pred)
+    stacked = np.sort(np.column_stack(cols), axis=1)
+    return {a: stacked[:, i] for i, a in enumerate(levels)}
+
+
+def _interval_metrics(
+    y_true: pd.Series,
+    quantile_models: dict[float, LGBMRegressor],
+    X_test: pd.DataFrame,
+    offsets: dict[float, float] | None = None,
+    levels: tuple[float, ...] = QUANTILE_LEVELS,
+) -> dict:
+    """Coverage + pinball loss for the quantile band on the held-out test."""
+    preds = predict_quantiles(quantile_models, X_test, offsets)
+    yt = np.asarray(y_true)
+    low, high = levels[0], levels[-1]
+    nominal = high - low  # e.g. 0.9 - 0.1 = 0.80
+    inside = (yt >= preds[low]) & (yt <= preds[high])
+    return {
+        "levels": list(levels),
+        "nominal_coverage": float(nominal),
+        "empirical_coverage": float(np.mean(inside)),
+        "mean_interval_width": float(np.mean(preds[high] - preds[low])),
+        "pinball_loss": {str(a): _pinball_loss(yt, preds[a], a) for a in levels},
+    }
 
 
 # ── Baselines ────────────────────────────────────────────────────────────────
@@ -271,6 +393,18 @@ def run_training(raw: pd.DataFrame) -> dict:
     model_test = _metrics(y_test, test_pred)
     logger.info("MODEL (held-out test)      MAE=%.3f  RMSE=%.3f", model_test["mae"], model_test["rmse"])
 
+    # Quantile models for prediction intervals (p10/p50/p90 by default).  The
+    # point model above stays the headline forecast; these add a conformalized
+    # band (calibrated on a train-pool tail, so coverage matches nominal).
+    quantile_models, quantile_offsets = train_quantile_models(X_train, y_train)
+    interval = _interval_metrics(y_test, quantile_models, X_test, quantile_offsets)
+    logger.info(
+        "INTERVAL (held-out test)   %.0f%% band: empirical coverage=%.1f%%  mean width=%.2f",
+        interval["nominal_coverage"] * 100,
+        interval["empirical_coverage"] * 100,
+        interval["mean_interval_width"],
+    )
+
     # 7. Assemble metrics with % improvement vs baselines --------------------
     metrics = {
         "dataset": {
@@ -296,6 +430,7 @@ def run_training(raw: pd.DataFrame) -> dict:
             "params": LGBM_PARAMS,
             "test": model_test,
         },
+        "intervals": interval,
         "improvement_vs_baseline": {
             "persistence": {
                 "mae_pct": _pct_improvement(baseline_persist["mae"], model_test["mae"]),
@@ -321,13 +456,16 @@ def run_training(raw: pd.DataFrame) -> dict:
     joblib.dump(
         {
             "model": model,
+            "quantile_models": quantile_models,     # {level: LGBMRegressor}
+            "quantile_offsets": quantile_offsets,   # {level: conformal offset}
+            "quantile_levels": list(QUANTILE_LEVELS),
             "feature_names": feature_names(),
             "target": TARGET_COLUMN,
             "trained_through": trained_through,
         },
         model_path,
     )
-    logger.info("Saved model → %s", model_path)
+    logger.info("Saved model (+%d quantile models) → %s", len(quantile_models), model_path)
 
     results_path = _write_results_md(metrics)
 
@@ -357,6 +495,7 @@ def _log_to_mlflow(
     m = metrics["model"]["test"]
     cv = metrics["validation"]
     imp = metrics["improvement_vs_baseline"]
+    iv = metrics["intervals"]
 
     # Params: model type, date range, features, run configuration.
     mlflow.log_params(
@@ -394,6 +533,10 @@ def _log_to_mlflow(
             "cv_rmse_std": cv["rmse_std"],
             "improvement_vs_persistence_mae_pct": imp["persistence"]["mae_pct"],
             "improvement_vs_seasonal_naive_mae_pct": imp["seasonal_naive"]["mae_pct"],
+            "interval_nominal_coverage": iv["nominal_coverage"],
+            "interval_empirical_coverage": iv["empirical_coverage"],
+            "interval_mean_width": iv["mean_interval_width"],
+            **{f"pinball_loss_q{k}": v for k, v in iv["pinball_loss"].items()},
         }
     )
 
@@ -454,6 +597,7 @@ def _write_results_md(metrics: dict) -> Path:
     m = metrics["model"]["test"]
     imp = metrics["improvement_vs_baseline"]
     cv = metrics["validation"]
+    iv = metrics["intervals"]
 
     lines = [
         "# PM2.5 Next-Day Forecast — Results",
@@ -482,6 +626,25 @@ def _write_results_md(metrics: dict) -> Path:
         f"| vs seasonal-naive | {imp['seasonal_naive']['mae_pct']:+.1f}% | {imp['seasonal_naive']['rmse_pct']:+.1f}% |",
         "",
         "_(Positive = the model reduces the baseline's error.)_",
+        "",
+        "## Prediction intervals (quantile LightGBM)",
+        "",
+        f"Alongside the point forecast we ship quantile models at "
+        f"{', '.join(f'p{int(a * 100)}' for a in iv['levels'])} "
+        f"(LightGBM `objective=\"quantile\"`), giving a "
+        f"{iv['nominal_coverage'] * 100:.0f}% central band.",
+        "",
+        "| Metric | Value |",
+        "|---|---:|",
+        f"| Nominal coverage | {iv['nominal_coverage'] * 100:.0f}% |",
+        f"| Empirical coverage (held-out test) | {iv['empirical_coverage'] * 100:.1f}% |",
+        f"| Mean interval width | {iv['mean_interval_width']:.2f} µg/m³ |",
+        *[f"| Pinball loss @ p{int(float(a) * 100)} | {v:.3f} |"
+          for a, v in iv["pinball_loss"].items()],
+        "",
+        "_Empirical coverage near the nominal level means the band is "
+        "well-calibrated; the API and dashboard surface this range so users see "
+        "forecast uncertainty, not just a point._",
         "",
         "## Cross-validation (train pool only)",
         "",

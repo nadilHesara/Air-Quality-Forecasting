@@ -1,0 +1,11 @@
+# Extra dependencies for the Phase 6 model-improvement experiments
+# (experiments/*.py) ONLY.  None of these are imported by src/ or the CI
+# retrain workflow, so the production install (requirements.txt) skips them.
+#
+#   pip install -r requirements.txt -r requirements-experiments.txt
+#
+-r requirements.txt
+
+optuna>=3.6        # 6.3 time-series-CV hyper-parameter search (logged to MLflow)
+xgboost>=2.0       # 6.4 gradient-boosting alternative in the model comparison
+statsmodels>=0.14  # 6.4 SARIMAX classical time-series baseline

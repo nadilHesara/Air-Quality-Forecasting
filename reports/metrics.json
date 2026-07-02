@@ -53,6 +53,21 @@
       "rmse": 4.531810675965956
     }
   },
+  "intervals": {
+    "levels": [
+      0.1,
+      0.5,
+      0.9
+    ],
+    "nominal_coverage": 0.8,
+    "empirical_coverage": 0.8,
+    "mean_interval_width": 13.024577906379882,
+    "pinball_loss": {
+      "0.1": 0.5916353326564402,
+      "0.5": 1.5269628239712947,
+      "0.9": 1.0027018347604393
+    }
+  },
   "improvement_vs_baseline": {
     "persistence": {
       "mae_pct": 4.46774940025549,

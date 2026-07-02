@@ -50,6 +50,13 @@ TEST_HORIZON_DAYS: int = 90   # most-recent window held out as the final test se
 N_CV_SPLITS: int = 5          # expanding-window TimeSeriesSplit folds (train pool)
 RANDOM_STATE: int = 42
 
+# Prediction-interval quantiles.  The point forecast stays the dedicated
+# MAE/L2 regressor; these three quantile models (LightGBM objective="quantile")
+# add a lower/median/upper band so the API and dashboard can show a range, not
+# just a point.  QUANTILE_LEVELS[0] and [-1] define the nominal interval
+# coverage (0.1 → 0.9 = an 80% central interval).
+QUANTILE_LEVELS: tuple[float, ...] = (0.1, 0.5, 0.9)
+
 # ── MLOps: experiment tracking (MLflow) ──────────────────────────────────────
 # Local, file-based tracking store committed to the repo (mlruns/).  To point
 # at a remote tracking server instead, set the MLFLOW_TRACKING_URI environment

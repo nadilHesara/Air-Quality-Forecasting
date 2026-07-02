@@ -90,6 +90,12 @@ class PredictionResult:
     model_version: str
     units: str = "µg/m³"
     history: list[dict[str, Any]] = field(default_factory=list)  # recent actuals
+    # Prediction interval (from the bundled quantile models).  ``None`` when the
+    # loaded model predates quantile support, so older artifacts still serve a
+    # point forecast.
+    pm25_lower: float | None = None      # lower quantile (e.g. p10)
+    pm25_upper: float | None = None      # upper quantile (e.g. p90)
+    interval_coverage: float | None = None  # nominal band width, e.g. 0.8
 
 
 def _today_utc() -> date:
@@ -125,6 +131,37 @@ def model_version(bundle: dict[str, Any]) -> str:
     trained_through = bundle.get("trained_through", "unknown")
     n_features = len(bundle["feature_names"])
     return f"{model_type}@{trained_through}-{n_features}feat"
+
+
+def predict_interval(
+    bundle: dict[str, Any], feature_row: pd.DataFrame
+) -> tuple[float | None, float | None, float | None]:
+    """Compute the (lower, upper, nominal_coverage) band for one feature row.
+
+    Reads the quantile models + conformal offsets the training run bundled
+    (see :func:`src.train.train_quantile_models`) and applies the same
+    calibration: lower levels shift down, upper levels shift up, then the row's
+    quantiles are sorted so the band can't invert.  Returns ``(None, None,
+    None)`` for older artifacts that have no quantile models, so the serving
+    path degrades to a point forecast instead of erroring.
+    """
+    qmodels: dict[float, Any] = bundle.get("quantile_models") or {}
+    if not qmodels:
+        return None, None, None
+    offsets: dict[float, float] = bundle.get("quantile_offsets") or {}
+    levels = sorted(qmodels)
+
+    preds = []
+    for a in levels:
+        p = float(qmodels[a].predict(feature_row)[0])
+        off = offsets.get(a, 0.0)
+        p = p - off if a < 0.5 else p + off
+        preds.append(p)
+    preds.sort()  # guarantee lower <= ... <= upper
+
+    lower, upper = preds[0], preds[-1]
+    coverage = float(levels[-1] - levels[0])
+    return round(lower, 2), round(upper, 2), coverage
 
 
 def fetch_recent_daily(
@@ -227,6 +264,7 @@ def predict_next_day(
     prediction_date = feature_date + timedelta(days=1)
 
     predicted = float(model.predict(feature_row)[0])
+    lower, upper, coverage = predict_interval(bundle, feature_row)
 
     # Recent actual PM2.5 for the dashboard chart.
     pm_actual = raw["pm2_5_mean"].dropna().tail(history_tail)
@@ -245,4 +283,7 @@ def predict_next_day(
         features={k: float(v) for k, v in feature_row.iloc[0].items()},
         model_version=model_version(bundle),
         history=history,
+        pm25_lower=lower,
+        pm25_upper=upper,
+        interval_coverage=coverage,
     )

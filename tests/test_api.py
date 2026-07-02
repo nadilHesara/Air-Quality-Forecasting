@@ -46,6 +46,9 @@ def _fake_result() -> PredictionResult:
         features={"pm2_5_mean": 12.3, "pm10_mean": 20.1},
         model_version="StubModel@2024-04-01-26feat",
         history=[{"date": "2024-03-31", "pm2_5": 11.0}],
+        pm25_lower=35.0,
+        pm25_upper=50.0,
+        interval_coverage=0.8,
     )
 
 
@@ -94,6 +97,9 @@ def test_predict_returns_expected_schema(monkeypatch) -> None:
         "feature_date",
         "prediction_date",
         "predicted_pm25",
+        "pm25_lower",
+        "pm25_upper",
+        "interval_coverage",
         "units",
         "model_version",
         "features",
@@ -103,6 +109,11 @@ def test_predict_returns_expected_schema(monkeypatch) -> None:
     assert body["feature_date"] == "2024-04-01"
     assert body["prediction_date"] == "2024-04-02"
     assert isinstance(body["features"], dict)
+    # Prediction interval is surfaced and well-ordered.
+    assert body["pm25_lower"] == 35.0
+    assert body["pm25_upper"] == 50.0
+    assert body["pm25_lower"] <= body["predicted_pm25"] <= body["pm25_upper"]
+    assert body["interval_coverage"] == 0.8
 
 
 def test_predict_503_when_model_missing(monkeypatch) -> None:

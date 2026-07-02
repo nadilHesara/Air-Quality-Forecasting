@@ -34,5 +34,8 @@ select = ["E", "W", "F", "I", "UP", "B"]
 # `config` / sibling modules so they run both as `python -m src.x` and directly.
 # That trips E402 (import not at top of file); it's intentional here.
 "src/*.py" = ["E402"]
+# The Phase 6 experiment scripts use the same sys.path.insert(...) shim so they
+# run as `python -m experiments.x`; that trips E402 (import not at top).
+"experiments/*.py" = ["E402"]
 "tests/conftest.py" = ["E402"]
 "config.py" = ["E402"]

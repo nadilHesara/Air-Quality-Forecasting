@@ -75,7 +75,16 @@ class PredictResponse(BaseModel):
     longitude: float
     feature_date: str = Field(..., description="The day whose features were used (today / latest complete day).")
     prediction_date: str = Field(..., description="The day the PM2.5 value is predicted for (tomorrow).")
-    predicted_pm25: float = Field(..., description="Predicted next-day mean PM2.5.")
+    predicted_pm25: float = Field(..., description="Predicted next-day mean PM2.5 (point / p50 forecast).")
+    pm25_lower: float | None = Field(
+        None, description="Lower bound of the prediction interval (e.g. p10); null if the model has no quantile band."
+    )
+    pm25_upper: float | None = Field(
+        None, description="Upper bound of the prediction interval (e.g. p90); null if the model has no quantile band."
+    )
+    interval_coverage: float | None = Field(
+        None, description="Nominal coverage of [pm25_lower, pm25_upper], e.g. 0.8 for an 80% band."
+    )
     units: str
     model_version: str
     features: dict[str, float] = Field(..., description="The exact feature row fed to the model.")
@@ -140,6 +149,9 @@ def predict() -> PredictResponse:
         feature_date=result.feature_date.isoformat(),
         prediction_date=result.prediction_date.isoformat(),
         predicted_pm25=result.predicted_pm25,
+        pm25_lower=result.pm25_lower,
+        pm25_upper=result.pm25_upper,
+        interval_coverage=result.interval_coverage,
         units=result.units,
         model_version=result.model_version,
         features=result.features,

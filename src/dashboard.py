@@ -47,6 +47,9 @@ def _run_prediction() -> dict:
         "feature_date": result.feature_date.isoformat(),
         "prediction_date": result.prediction_date.isoformat(),
         "predicted_pm25": result.predicted_pm25,
+        "pm25_lower": result.pm25_lower,
+        "pm25_upper": result.pm25_upper,
+        "interval_coverage": result.interval_coverage,
         "units": result.units,
         "model_version": result.model_version,
         "features": result.features,
@@ -75,6 +78,10 @@ delta = (
     else None
 )
 
+lower, upper = res.get("pm25_lower"), res.get("pm25_upper")
+coverage = res.get("interval_coverage")
+has_interval = lower is not None and upper is not None
+
 col1, col2 = st.columns(2)
 col1.metric(
     label=f"Predicted PM2.5 for {res['prediction_date']}",
@@ -82,6 +89,9 @@ col1.metric(
     delta=f"{delta:+.2f} vs latest actual" if delta is not None else None,
     delta_color="inverse",  # higher PM2.5 is worse → red
 )
+if has_interval:
+    band = f"{coverage * 100:.0f}%" if coverage else "prediction"
+    col1.caption(f"{band} interval: **{lower} – {upper}** {res['units']}")
 if latest_actual is not None:
     col2.metric(
         label=f"Latest actual ({res['feature_date']})",
@@ -98,12 +108,25 @@ else:
     chart_df = history_df.rename(columns={"pm2_5": "Actual PM2.5"}).set_index("date")
 
     # Overlay the prediction as a separate series at the prediction date so it
-    # renders as a distinct forward point on the same axes.
+    # renders as a distinct forward point on the same axes.  When the model
+    # carries a quantile band, plot the lower/upper bounds as their own forward
+    # points so the range is visible alongside the point forecast.
     pred_date = pd.to_datetime(res["prediction_date"])
     chart_df.loc[pred_date, "Predicted PM2.5"] = res["predicted_pm25"]
+    y_series = ["Actual PM2.5", "Predicted PM2.5"]
+    if has_interval:
+        chart_df.loc[pred_date, "Lower bound"] = lower
+        chart_df.loc[pred_date, "Upper bound"] = upper
+        y_series += ["Lower bound", "Upper bound"]
     chart_df = chart_df.sort_index()
 
-    st.line_chart(chart_df, y=["Actual PM2.5", "Predicted PM2.5"])
+    st.line_chart(chart_df, y=y_series)
+    if has_interval:
+        st.caption(
+            f"Shaded range = {coverage * 100:.0f}% prediction interval "
+            f"(p{int((1 - coverage) / 2 * 100)}–p{int((1 - (1 - coverage) / 2) * 100)})."
+            if coverage else "Lower/upper bounds shown as forward points."
+        )
 
 # ── Details ──────────────────────────────────────────────────────────────────
 st.caption(f"Model version: `{res['model_version']}`")

@@ -22,6 +22,21 @@
 
 _(Positive = the model reduces the baseline's error.)_
 
+## Prediction intervals (quantile LightGBM)
+
+Alongside the point forecast we ship quantile models at p10, p50, p90 (LightGBM `objective="quantile"`), giving a 80% central band.
+
+| Metric | Value |
+|---|---:|
+| Nominal coverage | 80% |
+| Empirical coverage (held-out test) | 80.0% |
+| Mean interval width | 13.02 µg/m³ |
+| Pinball loss @ p10 | 0.592 |
+| Pinball loss @ p50 | 1.527 |
+| Pinball loss @ p90 | 1.003 |
+
+_Empirical coverage near the nominal level means the band is well-calibrated; the API and dashboard surface this range so users see forecast uncertainty, not just a point._
+
 ## Cross-validation (train pool only)
 
 TimeSeriesSplit expanding window, 5 folds (train pool only):
