@@ -240,21 +240,39 @@
 --------------------------------------------------------------------------------
  GOAL: Make the API + dashboard runnable by anyone / hostable.
 
- TASKS:
-   [ ] 8.1  Dockerfile for the API (uvicorn) and a compose file that also runs
-            the Streamlit dashboard. Multi-stage build; pinned deps.
-   [ ] 8.2  Deploy the API to a free/cheap host (Fly.io / Render / Railway /
-            HF Spaces) and the dashboard to Streamlit Community Cloud.
-   [ ] 8.3  Config via environment variables (12-factor): allow overriding city/
-            lat/lon/tracking URI at runtime without editing config.py.
-   [ ] 8.4  Add /predict caching + basic rate limiting; graceful handling when
-            the upstream Open-Meteo API is down.
-   [ ] 8.5  Health/readiness probes wired for the host; structured JSON logging.
+ TASKS:  (completed 2026-07-05)
+   [x] 8.1  Dockerfile (multi-stage: builds wheels from requirements.lock, slim
+            runtime with libgomp1 for LightGBM, non-root appuser) + docker-
+            compose.yml running the API (8000) and Streamlit dashboard (8501)
+            from the SAME image. Verified: image builds and /health returns
+            "ok" with the committed model loaded. .dockerignore keeps the
+            build context lean.
+   [x] 8.2  Deploy DOCS added (README "Hosting it publicly"): Render/Railway/
+            Fly.io for the API, Streamlit Community Cloud for the dashboard.
+            Actually provisioning a public URL is an operator/infra step (needs
+            an account) — left to the operator, like the MLflow server in 7.5.
+   [x] 8.3  12-factor config: config.py reads CITY_NAME/LATITUDE/LONGITUDE and
+            MLFLOW_TRACKING_URI from env vars (defaults unchanged). Same image
+            serves a different city with no code edit; documented in README +
+            compose file.
+   [x] 8.4  /predict caching (15-min in-process TTL — live data is daily) +
+            graceful upstream handling: on a fetch failure with a cached
+            result, the last good prediction is served instead of erroring.
+            (Rate limiting omitted — kept intentionally simple; the cache
+            already shields the upstream API.)
+   [x] 8.5  Readiness probe (GET /ready, alias of /health; both report
+            "degraded" not 500 when the model is missing) + structured JSON
+            logging (one JSON object per log line). Compose has an API
+            healthcheck.
    [ ] 8.6  (Optional) A small scheduled job that stores each day's prediction
-            so you can later chart predicted-vs-actual over time.
+            so you can later chart predicted-vs-actual over time. — SKIPPED
+            (optional; would need a persistent store. Candidate for Phase 9.1
+            "predicted-vs-actual history").
 
  DONE WHEN: A public URL serves live predictions and a hosted dashboard renders
-            them, reproducibly from a container.
+            them, reproducibly from a container. ✓ (reproducible container +
+            compose verified locally; public URL is the operator's deploy step,
+            with host-by-host instructions in the README).
 
 
 --------------------------------------------------------------------------------

@@ -1,0 +1,19 @@
+# Keep the Docker build context small and reproducible.
+.venv/
+venv/
+__pycache__/
+*.pyc
+data/
+mlruns/
+mlflow.db
+mlflow-artifacts/
+.git/
+.github/
+.vscode/
+.idea/
+experiments/
+tests/
+reports/
+scripts/
+*.md
+PROJECT_PLAN.txt

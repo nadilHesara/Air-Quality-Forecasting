@@ -25,8 +25,10 @@ Run::
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -46,8 +48,33 @@ from src.inference import (  # noqa: E402
     predict_next_day,
 )
 
-logging.basicConfig(level=logging.INFO)
+
+# ── Structured JSON logging (8.5) ────────────────────────────────────────────
+# One JSON object per line so a hosting platform's log collector can parse
+# fields (level, message, timestamp) instead of scraping free text.
+class _JsonLogFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return json.dumps(
+            {
+                "time": self.formatTime(record),
+                "level": record.levelname,
+                "logger": record.name,
+                "message": record.getMessage(),
+            }
+        )
+
+
+_handler = logging.StreamHandler()
+_handler.setFormatter(_JsonLogFormatter())
+logging.basicConfig(level=logging.INFO, handlers=[_handler], force=True)
 logger = logging.getLogger(__name__)
+
+# ── Live-prediction cache (8.4) ──────────────────────────────────────────────
+# Live data only refreshes daily, so we serve a cached prediction for a short
+# window instead of hitting Open-Meteo on every request.  This doubles as a
+# fallback: if a later fetch fails, we can still return the last good result.
+_CACHE_TTL_SECONDS: int = 900  # 15 minutes
+_prediction_cache: dict[str, object] = {"result": None, "at": 0.0}
 
 app = FastAPI(
     title="PM2.5 Next-Day Forecast API",
@@ -124,9 +151,26 @@ def health() -> HealthResponse:
     )
 
 
+# Readiness alias so a host's readiness probe can point at a dedicated path.
+@app.get("/ready", response_model=HealthResponse)
+def ready() -> HealthResponse:
+    """Readiness probe — same check as /health (model present & loadable)."""
+    return health()
+
+
 @app.get("/predict", response_model=PredictResponse)
 def predict() -> PredictResponse:
-    """Predict tomorrow's PM2.5 for the configured city from live data."""
+    """Predict tomorrow's PM2.5 for the configured city from live data.
+
+    Serves a cached result for :data:`_CACHE_TTL_SECONDS` to avoid re-fetching
+    on every call.  If a fresh fetch fails (e.g. Open-Meteo is down) but a
+    cached result exists, the stale result is returned instead of erroring.
+    """
+    now = time.time()
+    cached = _prediction_cache["result"]
+    if cached is not None and now - float(_prediction_cache["at"]) < _CACHE_TTL_SECONDS:
+        return cached  # type: ignore[return-value]
+
     try:
         result = predict_next_day()
     except ModelNotFoundError as exc:
@@ -137,12 +181,15 @@ def predict() -> PredictResponse:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:  # upstream API failure, network error, etc.
         logger.exception("Prediction failed")
+        if cached is not None:
+            logger.warning("Serving stale cached prediction after fetch failure.")
+            return cached  # type: ignore[return-value]
         raise HTTPException(
             status_code=502,
             detail=f"Failed to produce a prediction from live data: {exc}",
         ) from exc
 
-    return PredictResponse(
+    response = PredictResponse(
         city=result.city,
         latitude=result.latitude,
         longitude=result.longitude,
@@ -156,3 +203,6 @@ def predict() -> PredictResponse:
         model_version=result.model_version,
         features=result.features,
     )
+    _prediction_cache["result"] = response
+    _prediction_cache["at"] = now
+    return response

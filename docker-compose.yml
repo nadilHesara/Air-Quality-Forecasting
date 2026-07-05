@@ -1,0 +1,40 @@
+# Runs the API and the Streamlit dashboard from the same image.
+#
+#   docker compose up --build
+#
+# Then open:
+#   - Dashboard:  http://localhost:8501   (the friendly UI)
+#   - API docs:   http://localhost:8000/docs
+#
+# Override the city without rebuilding by setting environment variables (12-factor):
+#   CITY_NAME=Mumbai LATITUDE=19.076 LONGITUDE=72.8777 docker compose up
+
+services:
+  api:
+    build: .
+    image: pm25-forecast
+    ports:
+      - "8000:8000"
+    environment:
+      CITY_NAME: ${CITY_NAME:-Colombo}
+      LATITUDE: ${LATITUDE:-6.9271}
+      LONGITUDE: ${LONGITUDE:-79.8612}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  dashboard:
+    # Reuse the image built by the `api` service.
+    image: pm25-forecast
+    build: .
+    command: streamlit run src/dashboard.py --server.port 8501 --server.address 0.0.0.0
+    ports:
+      - "8501:8501"
+    environment:
+      CITY_NAME: ${CITY_NAME:-Colombo}
+      LATITUDE: ${LATITUDE:-6.9271}
+      LONGITUDE: ${LONGITUDE:-79.8612}
+    depends_on:
+      - api

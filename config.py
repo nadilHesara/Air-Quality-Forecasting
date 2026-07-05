@@ -6,12 +6,17 @@ location.  Every fetch function reads from this module, so a single change
 here propagates everywhere.
 """
 
+import os
 from pathlib import Path
 
 # ── Location ─────────────────────────────────────────────────────────────────
-CITY_NAME: str = "Colombo"
-LATITUDE: float = 6.9271
-LONGITUDE: float = 79.8612
+# 12-factor: every location knob can be overridden at runtime by an environment
+# variable, so the same container image can serve a different city without
+# editing this file (e.g. `CITY_NAME=Mumbai LATITUDE=19.076 ...`).  The values
+# below are the defaults used when the variable is unset.
+CITY_NAME: str = os.environ.get("CITY_NAME", "Colombo")
+LATITUDE: float = float(os.environ.get("LATITUDE", "6.9271"))
+LONGITUDE: float = float(os.environ.get("LONGITUDE", "79.8612"))
 
 # ── Date range (inclusive) ───────────────────────────────────────────────────
 START_DATE: str = "2023-06-15"
@@ -62,7 +67,9 @@ QUANTILE_LEVELS: tuple[float, ...] = (0.1, 0.5, 0.9)
 # at a remote tracking server instead, set the MLFLOW_TRACKING_URI environment
 # variable (e.g. "http://my-mlflow-server:5000") — it overrides the local
 # default below.  See the README ("Pointing MLflow at a remote server").
-MLFLOW_TRACKING_URI: str = (PROJECT_ROOT / "mlruns").as_uri()
+MLFLOW_TRACKING_URI: str = os.environ.get(
+    "MLFLOW_TRACKING_URI", (PROJECT_ROOT / "mlruns").as_uri()
+)
 MLFLOW_EXPERIMENT_NAME: str = "pm25-next-day-forecast"
 
 # The Model Registry name used when a registry-capable tracking backend is

@@ -5,6 +5,40 @@ data ingestion → feature engineering → training & evaluation → serving (AP
 dashboard) → MLOps (experiment tracking + automated retraining).  Designed to
 be easily re-targeted to any city by editing `config.py`.
 
+## 👀 Just want to see the result? (no coding needed)
+
+This project predicts **tomorrow's air pollution (PM2.5)** for a city and shows
+it on a simple web page called the **dashboard**. Here is the easiest way to
+open it in your browser.
+
+**What you need:** [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+installed (free). That's it — you do **not** need Python or any coding.
+
+**Steps:**
+
+1. Download this project (green **Code** button → **Download ZIP**) and unzip it.
+2. Open **Docker Desktop** and wait until it says it is running.
+3. Open a terminal (on Windows: **PowerShell**; on Mac: **Terminal**), then go
+   into the unzipped folder. For example:
+   ```
+   cd Air-Quality-Forecasting
+   ```
+4. Type this one command and press Enter (the first time it takes a few minutes):
+   ```
+   docker compose up --build
+   ```
+5. When it stops printing new lines, open your web browser and go to:
+
+   **http://localhost:8501**
+
+That's the dashboard. It shows tomorrow's predicted PM2.5 and a chart of the
+last 30 days. Click **🔄 Refresh** to update it.
+
+When you're done, go back to the terminal and press **Ctrl + C** to stop it.
+
+> Prefer not to install anything? The same dashboard can be hosted online for
+> free — see [Deployment](#deployment--packaging) below for a public link setup.
+
 ## Data Sources
 
 | Dataset | API | Resolution | Variables |
@@ -18,7 +52,9 @@ Both APIs are **free** and require **no API key** for non-commercial use.
 
 ```
 Air-Quality-Forecasting/
-├── config.py               # Location, dates, API URLs, schedule, MLflow settings
+├── config.py               # Location, dates, API URLs, schedule, MLflow settings (env-overridable)
+├── Dockerfile              # Multi-stage image for the API + dashboard
+├── docker-compose.yml      # Runs the API (8000) and dashboard (8501) together
 ├── requirements.txt
 ├── src/
 │   ├── fetch_weather.py    # Reusable weather data fetcher
@@ -136,6 +172,66 @@ streamlit run src/dashboard.py
 Shows tomorrow's predicted PM2.5 with its 80% prediction interval and a chart
 of the last ~30 days of actual PM2.5 with the latest prediction (and its
 lower/upper band) overlaid.
+
+## Deployment & Packaging
+
+The whole service (API + dashboard) ships as **one Docker image** built from the
+**pinned** `requirements.lock`, so it runs the same on any machine.
+
+### Run everything with Docker Compose
+
+```bash
+docker compose up --build
+```
+
+- Dashboard → **http://localhost:8501**
+- API docs  → **http://localhost:8000/docs**
+- Health    → **http://localhost:8000/health**
+
+Stop it with **Ctrl + C**. To run just the API in a plain container:
+
+```bash
+docker build -t pm25-forecast .
+docker run -p 8000:8000 pm25-forecast
+```
+
+### Configuration via environment variables (12-factor)
+
+The same image can serve a different city with **no code change** — override the
+config knobs at runtime:
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `CITY_NAME` | `Colombo` | Display name of the city |
+| `LATITUDE` | `6.9271` | Latitude of the city |
+| `LONGITUDE` | `79.8612` | Longitude of the city |
+| `MLFLOW_TRACKING_URI` | local `mlruns/` | Remote MLflow server (optional) |
+| `MODEL_SOURCE` | `local` | `local` = committed model, `registry` = MLflow production model |
+
+```bash
+CITY_NAME=Mumbai LATITUDE=19.076 LONGITUDE=72.8777 docker compose up
+```
+
+### Serving robustness
+
+- **Caching** — `GET /predict` caches its result for 15 minutes (live data only
+  refreshes daily), so repeated calls don't re-hit the upstream API.
+- **Graceful upstream failure** — if Open-Meteo is unreachable on a refresh but a
+  recent prediction is cached, the last good result is returned instead of an error.
+- **Probes** — `GET /health` and `GET /ready` report whether the model is loadable
+  (they return `"degraded"`, not a 500, when the model file is missing) — wire these
+  to your host's liveness/readiness checks. `docker-compose.yml` already includes a
+  healthcheck for the API.
+- **Structured logs** — the API emits one JSON object per log line, so a hosted
+  platform's log collector can parse `level` / `message` / `time`.
+
+### Hosting it publicly (free tiers)
+
+- **API** — any container host works: **Render**, **Railway**, or **Fly.io**. Point
+  it at this repo/Dockerfile; it exposes port `8000`, and set the readiness path to
+  `/ready`.
+- **Dashboard** — deploy to **Streamlit Community Cloud**: connect the repo, set the
+  app file to `src/dashboard.py`, and it builds from `requirements.txt` automatically.
 
 ## Output
 

@@ -9,12 +9,20 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 
 import src.api as api
 from src.inference import ModelNotFoundError, PredictionResult
 
 client = TestClient(api.app)
+
+
+@pytest.fixture(autouse=True)
+def _clear_prediction_cache() -> None:
+    """Reset the /predict cache before each test so results don't leak across."""
+    api._prediction_cache["result"] = None
+    api._prediction_cache["at"] = 0.0
 
 
 class _FakePath:
@@ -134,3 +142,21 @@ def test_predict_422_when_data_insufficient(monkeypatch) -> None:
     monkeypatch.setattr(api, "predict_next_day", _raise)
     resp = client.get("/predict")
     assert resp.status_code == 422
+
+
+def test_predict_serves_stale_cache_on_upstream_failure(monkeypatch) -> None:
+    """After one good prediction, a later fetch failure returns the cached result."""
+    monkeypatch.setattr(api, "predict_next_day", lambda: _fake_result())
+    first = client.get("/predict")
+    assert first.status_code == 200
+
+    # Force the cache to look expired so the endpoint re-fetches, then fail.
+    api._prediction_cache["at"] = 0.0
+
+    def _boom() -> PredictionResult:
+        raise RuntimeError("Open-Meteo is down")
+
+    monkeypatch.setattr(api, "predict_next_day", _boom)
+    resp = client.get("/predict")
+    assert resp.status_code == 200
+    assert resp.json()["predicted_pm25"] == 42.0
