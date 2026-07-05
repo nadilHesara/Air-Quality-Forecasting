@@ -1,522 +1,220 @@
 # PM2.5 Air-Quality Forecasting
 
-End-to-end pipeline for **next-day PM2.5 prediction** in Colombo, Sri Lanka:
-data ingestion → feature engineering → training & evaluation → serving (API +
-dashboard) → MLOps (experiment tracking + automated retraining).  Designed to
-be easily re-targeted to any city by editing `config.py`.
+Predicts **tomorrow's air pollution (PM2.5)** for Colombo, Sri Lanka. It pulls
+live weather and air data, builds features, trains a model, and shows the
+forecast on a web page. You can point it at any city by editing `config.py`.
 
-## 👀 Just want to see the result? (no coding needed)
+## 🌐 See it live
 
-This project predicts **tomorrow's air pollution (PM2.5)** for a city and shows
-it on a simple web page called the **dashboard**. Here is the easiest way to
-open it in your browser.
+**👉 https://colombo-air-forecast.streamlit.app/**
 
-**What you need:** [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-installed (free). That's it — you do **not** need Python or any coding.
+Open that link in any browser to see tomorrow's forecast and a chart of the
+last 30 days. Click **🔄 Refresh** for the latest numbers. No install needed.
 
-**Steps:**
+> The app sleeps after a few days with no visitors. If you see a "waking up"
+> screen, wait about 30 seconds and it loads.
 
-1. Download this project (green **Code** button → **Download ZIP**) and unzip it.
-2. Open **Docker Desktop** and wait until it says it is running.
-3. Open a terminal (on Windows: **PowerShell**; on Mac: **Terminal**), then go
-   into the unzipped folder. For example:
-   ```
-   cd Air-Quality-Forecasting
-   ```
-4. Type this one command and press Enter (the first time it takes a few minutes):
-   ```
-   docker compose up --build
-   ```
-5. When it stops printing new lines, open your web browser and go to:
+## What's inside
 
-   **http://localhost:8501**
+The full flow: get data → build features → train a model → check it → serve it
+(web page + API) → retrain it every week on its own, safely.
 
-That's the dashboard. It shows tomorrow's predicted PM2.5 and a chart of the
-last 30 days. Click **🔄 Refresh** to update it.
+- **Model:** LightGBM, predicts next-day mean PM2.5.
+- **Data:** free [Open-Meteo](https://open-meteo.com/) weather + air-quality
+  APIs (no API key). Weather is daily; air quality is hourly, rolled up to
+  daily. Both are joined on the date.
+- **Uncertainty:** the model also gives a low/high range (an 80% band), not
+  just a single number.
 
-When you're done, go back to the terminal and press **Ctrl + C** to stop it.
+## Run it on your own computer
 
-> Prefer not to install anything? The same dashboard can be hosted online for
-> free — see [Deployment](#deployment--packaging) below for a public link setup.
-
-## Data Sources
-
-| Dataset | API | Resolution | Variables |
-|---------|-----|------------|-----------|
-| Historical weather | [Open-Meteo Archive API](https://open-meteo.com/en/docs/historical-weather-api) (`archive-api.open-meteo.com`) | Daily, 0.1–0.25° | Temperature, wind speed/direction, humidity, precipitation, surface pressure |
-| Air quality (PM2.5 / PM10) | [Open-Meteo Air Quality API](https://open-meteo.com/en/docs/air-quality-api) (`air-quality-api.open-meteo.com`) | Hourly → aggregated to daily | PM2.5, PM10 (CAMS model) |
-
-Both APIs are **free** and require **no API key** for non-commercial use.
-
-## Project Structure
-
-```
-Air-Quality-Forecasting/
-├── config.py               # Location, dates, API URLs, schedule, MLflow settings (env-overridable)
-├── Dockerfile              # Multi-stage image for the API + dashboard
-├── docker-compose.yml      # Runs the API (8000) and dashboard (8501) together
-├── requirements.txt
-├── src/
-│   ├── fetch_weather.py    # Reusable weather data fetcher
-│   ├── fetch_air_quality.py# Reusable air-quality fetcher
-│   ├── build_dataset.py    # Join + feature engineering + save
-│   ├── features.py         # Single source of truth for features (train + serve)
-│   ├── validate.py         # Pre-training data validation gate (schema/range/volume)
-│   ├── train.py            # End-to-end: fetch → validate → features → train → evaluate → save (+ MLflow)
-│   ├── promotion_gate.py   # Champion/challenger MAE gate for automated retrains
-│   ├── drift.py            # Seasonal PSI feature-drift + prediction-error monitoring
-│   ├── backtest.py         # Walk-forward backtesting harness (refit through history)
-│   ├── registry.py         # MLflow Model Registry: register / promote / load @production
-│   ├── inference.py        # Shared serving path (fetch → features → predict)
-│   ├── api.py              # FastAPI app (/health, /predict)
-│   └── dashboard.py        # Streamlit dashboard
-├── scripts/
-│   ├── eda.py              # Time-series plot of PM2.5
-│   ├── start_mlflow_server.ps1  # Persistent registry-capable MLflow server (Windows)
-│   └── start_mlflow_server.sh   # … same for Linux/macOS
-├── experiments/           # Phase 6 model-improvement studies (offline, not in serving)
-│   ├── error_analysis.py  # 6.1 where the model loses to persistence
-│   ├── feature_experiments.py # 6.2 leakage-guarded feature candidates
-│   ├── tune_lgbm.py       # 6.3 Optuna HPO (logged to MLflow)
-│   ├── model_comparison.py# 6.4 LGBM vs XGBoost vs Ridge vs SARIMAX
-│   └── multi_horizon.py   # 6.6 +1/+2/+3-day forecasts (stretch)
-├── .github/workflows/
-│   ├── ci.yml              # Lint + tests on every push/PR (no network)
-│   └── retrain.yml         # Weekly: fetch → drift-check → validate+train → gate → commit
-├── models/
-│   └── model.joblib            (committed; point + p10/p50/p90 quantile models)
-├── mlruns/                     # MLflow local tracking store (gitignored; uploaded as CI artifact)
-├── data/
-│   └── training_data.parquet   (generated)
-└── reports/
-    ├── metrics.json            (generated)
-    ├── results.md              (generated)
-    ├── shap_summary.png        (generated)
-    ├── pm25_timeseries.png     (generated)
-    ├── feature_reference.json  (generated — training-time feature distributions for drift checks)
-    ├── drift_report.md / .json (generated — latest drift-check outcome)
-    └── backtest.md / .json / backtest_mae.png  (generated — walk-forward backtest)
-```
-
-## Quick Start
-
-```bash
-# 1. Create a virtual environment (recommended)
-python -m venv .venv
-.venv\Scripts\activate        # Windows
-# source .venv/bin/activate   # Linux / macOS
-
-# 2. Install dependencies
-pip install -r requirements.txt
-
-# 3. Train end-to-end — fetches latest data, builds features, trains,
-#    evaluates vs baselines, saves the model, and logs an MLflow run.
-python -m src.train
-
-# (optional) re-run on the already-fetched parquet, no network:
-python -m src.train --use-cached
-
-# (optional) generate the EDA plot (needs the parquet from a prior run)
-python scripts/eda.py
-```
-
-`src/train.py` is the **single reproducible entry point**. One command takes
-you from nothing to a fresh, evaluated, persisted model:
-
-1. **fetch** latest weather + air-quality for the configured city/date range,
-2. **build features + target** (the same `src/features.py` used at serving time),
-3. **train** a LightGBM regressor (time-series CV on the train pool only),
-4. **evaluate** once on a held-out test set vs persistence & seasonal-naive baselines,
-5. **save** `models/model.joblib`, `reports/metrics.json`, `reports/results.md`,
-   `reports/shap_summary.png`, and log everything to MLflow.
-
-`python -m src.build_dataset` still exists if you only want to (re)build the
-training parquet without training.
-
-## Serving (API + Dashboard)
-
-The serving layer reuses the **same** fetch functions and the **same**
-`src/features.py` feature builder used in training, so the schema the model
-sees in production can't drift.  Both surfaces share one prediction path in
-`src/inference.py` (fetch live data → build one feature row → predict
-tomorrow's PM2.5).
-
-> Prerequisite: `models/model.joblib` must exist — run `python -m src.train`
-> first.  The API reports `"degraded"` on `/health` and returns `503` from
-> `/predict` if the model file is missing.
-
-### REST API (FastAPI + Uvicorn)
-
-```bash
-uvicorn src.api:app --reload --port 8000
-```
-
-- `GET http://localhost:8000/health` — liveness/readiness (model present & loadable).
-- `GET http://localhost:8000/predict` — tomorrow's predicted PM2.5 **with an 80%
-  prediction interval** (`pm25_lower` / `pm25_upper` / `interval_coverage`), the
-  exact input features, and a model version string.
-- Interactive docs: `http://localhost:8000/docs`
-
-Example:
-
-```bash
-curl http://localhost:8000/predict
-```
-
-### Dashboard (Streamlit)
-
-```bash
-streamlit run src/dashboard.py
-```
-
-Shows tomorrow's predicted PM2.5 with its 80% prediction interval and a chart
-of the last ~30 days of actual PM2.5 with the latest prediction (and its
-lower/upper band) overlaid.
-
-## Deployment & Packaging
-
-The whole service (API + dashboard) ships as **one Docker image** built from the
-**pinned** `requirements.lock`, so it runs the same on any machine.
-
-### Run everything with Docker Compose
+**Easiest way — Docker** (needs [Docker Desktop](https://www.docker.com/products/docker-desktop/), no Python):
 
 ```bash
 docker compose up --build
 ```
 
-- Dashboard → **http://localhost:8501**
-- API docs  → **http://localhost:8000/docs**
-- Health    → **http://localhost:8000/health**
+Then open:
+- Web page → **http://localhost:8501**
+- API docs → **http://localhost:8000/docs**
 
-Stop it with **Ctrl + C**. To run just the API in a plain container:
+Press **Ctrl + C** to stop.
+
+**With Python instead:**
 
 ```bash
-docker build -t pm25-forecast .
-docker run -p 8000:8000 pm25-forecast
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # Mac / Linux
+pip install -r requirements.txt
+
+python -m src.train             # train the model (fetches data, saves model)
+streamlit run src/dashboard.py  # open the web page
+uvicorn src.api:app --port 8000 # or run the API
 ```
 
-### Configuration via environment variables (12-factor)
+`src/train.py` is the one command that does everything: fetch → check data →
+build features → train → test against baselines → save the model and reports →
+log to MLflow.
 
-The same image can serve a different city with **no code change** — override the
-config knobs at runtime:
+## The two ways to use it
+
+Both share the **same** feature code and the **same** prediction path
+(`src/inference.py`), so the model always sees the same kind of input.
+
+**Web page (Streamlit)** — `src/dashboard.py`. Shows tomorrow's PM2.5, its
+low/high range, and the last 30 days as a chart.
+
+**API (FastAPI)** — `src/api.py`:
+- `GET /health` and `GET /ready` — is the model loaded and ready?
+- `GET /predict` — tomorrow's PM2.5 with the low/high range and the input
+  features. Docs at `/docs`.
+
+The API caches each prediction for 15 minutes (the data only changes daily). If
+the data source goes down, it serves the last good answer instead of failing.
+Logs are one JSON line each, so hosts can read them easily.
+
+## Change the city
+
+You don't need to touch the code — set environment variables:
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `CITY_NAME` | `Colombo` | Display name of the city |
-| `LATITUDE` | `6.9271` | Latitude of the city |
-| `LONGITUDE` | `79.8612` | Longitude of the city |
+| `CITY_NAME` | `Colombo` | City name to show |
+| `LATITUDE` | `6.9271` | City latitude |
+| `LONGITUDE` | `79.8612` | City longitude |
 | `MLFLOW_TRACKING_URI` | local `mlruns/` | Remote MLflow server (optional) |
-| `MODEL_SOURCE` | `local` | `local` = committed model, `registry` = MLflow production model |
+| `MODEL_SOURCE` | `local` | `local` = saved file, `registry` = MLflow model |
 
 ```bash
 CITY_NAME=Mumbai LATITUDE=19.076 LONGITUDE=72.8777 docker compose up
 ```
 
-### Serving robustness
+To also change the training date range, edit `config.py` (`START_DATE` /
+`END_DATE`) and re-run `python -m src.train`.
 
-- **Caching** — `GET /predict` caches its result for 15 minutes (live data only
-  refreshes daily), so repeated calls don't re-hit the upstream API.
-- **Graceful upstream failure** — if Open-Meteo is unreachable on a refresh but a
-  recent prediction is cached, the last good result is returned instead of an error.
-- **Probes** — `GET /health` and `GET /ready` report whether the model is loadable
-  (they return `"degraded"`, not a 500, when the model file is missing) — wire these
-  to your host's liveness/readiness checks. `docker-compose.yml` already includes a
-  healthcheck for the API.
-- **Structured logs** — the API emits one JSON object per log line, so a hosted
-  platform's log collector can parse `level` / `message` / `time`.
+## Deploy it yourself
 
-### Hosting it publicly (free tiers)
+The live app runs on **Streamlit Community Cloud** (free):
 
-- **API** — any container host works: **Render**, **Railway**, or **Fly.io**. Point
-  it at this repo/Dockerfile; it exposes port `8000`, and set the readiness path to
-  `/ready`.
-- **Dashboard** — deploy to **Streamlit Community Cloud**: connect the repo, set the
-  app file to `src/dashboard.py`, and it builds from `requirements.txt` automatically.
+1. Push this repo to GitHub.
+2. Go to [share.streamlit.io](https://share.streamlit.io), sign in with GitHub.
+3. **Create app** → pick this repo, branch `main`, main file `src/dashboard.py`.
+4. Pick a URL name and click **Deploy**. First build takes a few minutes.
 
-## Output
+The saved model (`models/model.joblib`) is in the repo, so the app runs with no
+extra setup. Every push to `main` redeploys it.
 
-- **`data/training_data.parquet`** — ~1 060 rows × 27 columns.  Each row is
-  one day with the raw weather + air-quality columns, the 26 engineered
-  features (lags, rolling stats, calendar), and the target (`pm25_next_day`).
+Want the API online too? It ships as one Docker image (`Dockerfile`), so any
+container host works — **Render**, **Railway**, or **Fly.io**. It listens on
+port `8000`; use `/ready` as the readiness check.
 
-- **`reports/pm25_timeseries.png`** — time-series plot of daily PM2.5 with a
-  30-day rolling-mean overlay for eyeballing seasonality.
+## How good is the model?
 
-## Model Performance & Prediction Intervals
+Next-day PM2.5 is a hard thing to beat, because "tomorrow ≈ today" is already a
+strong guess (day-to-day PM2.5 is highly correlated). So the model only edges
+past that simple baseline on average — and we're honest about it.
 
-On the held-out test the LightGBM point forecast beats persistence by **+4.5%
-MAE / +7.5% RMSE** and seasonal-naive by ~39%. That persistence gap is *small
-on purpose*: daily-mean PM2.5 has lag-1 autocorrelation ≈ **0.83**, so "tomorrow
-≈ today" is a genuinely strong baseline. The Phase 6 study
-([`reports/phase6_summary.md`](reports/phase6_summary.md)) shows that a linear
-model, XGBoost, and SARIMAX all land within a ~5% MAE band of each other and of
-persistence — the remaining gap is largely **intrinsic** to the series, not a
-modelling shortfall.
+Over a full walk-forward backtest (24 rounds, 693 predictions):
 
-The real value-add is honest **uncertainty**: the model ships three LightGBM
-quantile regressors (p10/p50/p90) with **split-conformal calibration**, so the
-80% band actually covers ~80% of held-out days (uncalibrated quantile LGBM
-under-covers at ~68%). `GET /predict` and the dashboard surface this range.
+| Method | MAE | RMSE |
+|--------|-----|------|
+| Model (LightGBM) | 4.23 | 5.82 |
+| Persistence ("tomorrow = today") | 4.16 | 5.90 |
+| Seasonal-naive | ~7.5 | — |
 
-Reproduce any study offline (needs `requirements-experiments.txt`):
+The real value is: it clearly beats the seasonal-naive baseline (~44%), has
+slightly better RMSE (fewer big misses), and — most useful — it gives a
+**calibrated low/high range** (three quantile models, p10/p50/p90, tuned so the
+80% band really covers ~80% of days). See
+[`reports/phase6_summary.md`](reports/phase6_summary.md) and
+[`reports/backtest.md`](reports/backtest.md).
 
-```bash
-pip install -r requirements.txt -r requirements-experiments.txt
-python -m experiments.error_analysis      # 6.1
-python -m experiments.feature_experiments  # 6.2
-python -m experiments.tune_lgbm            # 6.3  (logs to MLflow experiment pm25-hpo)
-python -m experiments.model_comparison     # 6.4
-python -m experiments.multi_horizon        # 6.6
+## MLOps — what keeps it safe and fresh
+
+- **Data check** (`src/validate.py`) — before any training, checks the data:
+  right columns, enough rows, sane values, no big date gaps. Bad data stops
+  the run.
+- **Retrain every week** (`.github/workflows/retrain.yml`) — GitHub Actions
+  fetches fresh data and retrains on a schedule (or on a button click).
+- **Quality gate** (`src/promotion_gate.py`) — a new model is only saved if it
+  isn't clearly worse than the current one. A bad retrain can't replace a good
+  model.
+- **Drift watch** (`src/drift.py`) — checks if the incoming data has shifted
+  (season-aware) or if recent errors are rising, and opens a GitHub issue if so.
+- **Backtest** (`src/backtest.py`) — replays history the way production runs, so
+  the reported numbers are honest.
+- **Experiment tracking** (MLflow) — every training run logs its params,
+  metrics, and model. Local by default; point `MLFLOW_TRACKING_URI` at a remote
+  server to enable the Model Registry (see `scripts/start_mlflow_server.*`).
+
+## Project layout
+
+```
+Air-Quality-Forecasting/
+├── config.py               # All settings (city, dates, APIs) — env-overridable
+├── Dockerfile              # One image for the API + web page
+├── docker-compose.yml      # Runs the API (8000) and web page (8501) together
+├── src/
+│   ├── fetch_weather.py / fetch_air_quality.py   # Get the data
+│   ├── build_dataset.py    # Join data + save
+│   ├── features.py         # Feature code (used by both train and serve)
+│   ├── validate.py         # Data checks before training
+│   ├── train.py            # Fetch → check → train → test → save (+ MLflow)
+│   ├── promotion_gate.py   # Only keep a new model if it's not worse
+│   ├── drift.py            # Watch for data / error drift
+│   ├── backtest.py         # Walk-forward history replay
+│   ├── registry.py         # MLflow Model Registry helpers
+│   ├── inference.py        # Shared predict path (fetch → features → predict)
+│   ├── api.py              # FastAPI app (/health, /ready, /predict)
+│   └── dashboard.py        # Streamlit web page
+├── experiments/            # Offline model-improvement studies
+├── scripts/                # EDA plot + MLflow server helpers
+├── .github/workflows/      # ci.yml (tests) + retrain.yml (weekly retrain)
+├── models/model.joblib     # The saved model (committed)
+└── reports/                # Metrics, plots, backtest, drift (generated)
 ```
 
-## MLOps — Experiment Tracking & Automated Retraining
+## Features used by the model
 
-### Experiment tracking (MLflow)
+All features come from `src/features.py`, used the same way in training and
+serving. There are **26 features**, plus the target. Every feature for day *t*
+only uses info up to and including day *t* (lags shift back, rolling windows
+look backward), so there's no leakage.
 
-Every `python -m src.train` run is wrapped in an [MLflow](https://mlflow.org/)
-run that logs:
+**Today's values (day *t*)**
 
-- **Params** — model type & hyper-parameters, city/lat/lon, date range, feature
-  count, CV/test configuration, and the trained-through date.
-- **Metrics** — the model's MAE/RMSE **and** the persistence / seasonal-naive
-  baseline numbers, the cross-validation MAE/RMSE (mean ± std), and the
-  % improvement over each baseline.
-- **Artifacts** — the SHAP summary plot, `metrics.json`, `results.md`, and the
-  serialized `model.joblib`.
-- **Model** — logged via `mlflow.sklearn.log_model` with an inferred signature
-  and input example.
+| Feature | Meaning |
+|---------|---------|
+| `pm2_5_mean`, `pm10_mean` | Today's mean PM2.5 / PM10 (µg/m³) |
+| `temperature_2m_mean` | Mean air temperature |
+| `wind_speed_10m_max` | Max wind speed |
+| `wind_direction_10m_dominant` | Main wind direction (degrees) |
+| `relative_humidity_2m_mean` | Mean humidity |
+| `precipitation_sum` | Total rain |
+| `surface_pressure_mean` | Mean surface pressure |
 
-The tracking store is **local and file-based** (`mlruns/`), created on first
-run and gitignored (MLflow's file store embeds the absolute artifact path at
-creation time, so a `mlruns/` built on Windows would break on a Linux CI runner
-and vice versa). `src/train.py` enables the file store automatically; to browse
-runs with the MLflow UI you set the same opt-in (MLflow 3.x gates the file
-backend behind it):
+**Past PM2.5 patterns**
 
-```bash
-# Windows PowerShell
-$env:MLFLOW_ALLOW_FILE_STORE = "true"; mlflow ui --backend-store-uri mlruns
-# bash
-MLFLOW_ALLOW_FILE_STORE=true mlflow ui --backend-store-uri mlruns
-# then open http://localhost:5000
-```
-
-Each CI retrain run uploads its `mlruns/` as a downloadable build artifact
-(retained 30 days) under **Actions → run → Artifacts**.
-
-#### Pointing MLflow at a remote tracking server
-
-Nothing in the code is hardcoded to the local store. To log to a remote
-[MLflow Tracking Server](https://mlflow.org/docs/latest/tracking/server.html)
-(or a managed one such as Databricks), set the `MLFLOW_TRACKING_URI`
-environment variable — it overrides the local default in `config.py`:
-
-```bash
-# Local / self-hosted tracking server
-export MLFLOW_TRACKING_URI="http://my-mlflow-server:5000"
-python -m src.train
-
-# Or a managed backend, e.g. Databricks
-export MLFLOW_TRACKING_URI="databricks"
-```
-
-In CI, set it as the repository variable **`MLFLOW_TRACKING_URI`** (Settings →
-Secrets and variables → Actions → Variables); the retrain workflow already
-passes it through — and, when it is set, also registers each new model in the
-server's **Model Registry** and promotes it after the quality gate (see
-below). `mlruns/` itself is never committed (the file store embeds absolute
-paths); without a remote server it is uploaded as a CI build artifact.
-
-#### Running a persistent tracking server (enables the Model Registry)
-
-The plain `mlruns/` file store has no Model Registry.  The included helper
-starts a **SQLite-backed** MLflow server locally — registry-capable, and runs
-persist across reclones because they live in `mlflow.db` (gitignored), not in
-the repo:
-
-```bash
-./scripts/start_mlflow_server.sh          # Linux/macOS
-# .\scripts\start_mlflow_server.ps1       # Windows
-# then, in another shell:
-export MLFLOW_TRACKING_URI="http://127.0.0.1:5000"
-python -m src.train
-```
-
-For CI you need a server GitHub's runners can reach: self-host the same
-command on any box (put it behind auth!), or use a managed backend (DagsHub,
-Databricks, Azure ML — all speak the MLflow tracking protocol), and set the
-`MLFLOW_TRACKING_URI` repo variable to it.
-
-### Automated retraining (GitHub Actions) — with safety rails
-
-[`.github/workflows/retrain.yml`](.github/workflows/retrain.yml) retrains the
-model on a schedule and on demand:
-
-- **Schedule** — weekly cron (the canonical schedule lives in `config.py` as
-  `RETRAIN_CRON`; a guard step in the workflow fails if the YAML cron drifts
-  from it).
-- **Manual** — the *Run workflow* button (`workflow_dispatch`).
-
-Each run walks a gated pipeline — a bad week's data or a regressed model
-**cannot** silently replace the serving model:
-
-1. **Snapshot the champion** — the committed `reports/metrics.json` is stashed
-   for the later comparison.
-2. **Fetch fresh data** (`python -m src.build_dataset`).
-3. **Drift check** (`python -m src.drift`) — scores the new data against the
-   previous run's feature reference profile and the committed model's recent
-   prediction error. Drift never blocks the retrain, but it **opens (or
-   updates) a GitHub issue** labelled `drift` with the full report.
-4. **Validate + train** (`python -m src.train --use-cached`) — training first
-   runs `src/validate.py` (schema, physical ranges, row count, index
-   integrity) and **fails the job loudly** on any violation.
-5. **Champion/challenger gate** (`python -m src.promotion_gate`) — the new
-   model's held-out test MAE is compared to the champion's. If it regressed
-   by more than `config.PROMOTION_MAX_MAE_REGRESSION_PCT` (default 5%), the
-   job **fails and nothing is committed** — the old model keeps serving. The
-   verdict is written to the run's step summary.
-6. **Registry promotion** — when a remote `MLFLOW_TRACKING_URI` is configured,
-   the newly registered model version is promoted from `@staging` to
-   `@production` (`python -m src.registry promote`).
-7. **Commit** the refreshed `models/model.joblib` + `reports/` back to the
-   branch — only if something actually changed. The commit message carries
-   `[skip ci]` to avoid retrigger loops.
-
-The workflow needs `contents: write` (push) and `issues: write` (drift
-alerts) permissions — both declared in the workflow.
-
-### Data validation (before every training run)
-
-`src/validate.py` gates every training run: required raw columns present,
-≥ `config.MIN_TRAINING_ROWS` rows, sorted/unique dates with no gap larger
-than `config.MAX_DATE_GAP_DAYS`, per-column NaN budget, physical ranges
-(PM2.5 within 0–500 µg/m³, humidity 0–100%, …), and a degenerate-feed check
-(constant PM2.5 means the upstream API broke). All violations are reported
-in a single `DataValidationError`. Run it standalone against the cached
-parquet:
-
-```bash
-python -m src.validate
-```
-
-### Drift monitoring
-
-`src/drift.py` watches for the world changing under the model:
-
-- **Feature drift** — at training time a *reference profile* of every
-  feature's distribution is saved (`reports/feature_reference.json`). The
-  check bins the most recent `config.DRIFT_WINDOW_DAYS` days with the same
-  edges and computes the **Population Stability Index** per feature. The
-  reference is **month-conditional** (a monsoon June is compared with
-  previous Junes, not the all-year distribution), which keeps the strongly
-  seasonal PM2.5 series from tripping the alarm every season.
-- **Prediction-error drift** — the committed model's MAE over the recent
-  window vs its committed held-out test MAE (alert above
-  `config.DRIFT_ERROR_RATIO_ALERT`×).
-
-Exit code 1 (drift) makes the CI workflow file a GitHub issue; the report
-lands in `reports/drift_report.md`.
-
-### Model Registry (MLflow)
-
-With a registry-capable tracking backend configured (see the server section
-above), every training run registers its model under
-`config.MLFLOW_REGISTERED_MODEL_NAME` with the **`@staging`** alias; the CI
-gate promotes it to **`@production`**. Serving can then load straight from
-the registry instead of the committed file:
-
-```bash
-export MLFLOW_TRACKING_URI="http://127.0.0.1:5000"
-export MODEL_SOURCE=registry          # default: "local" (models/model.joblib)
-uvicorn src.api:app --port 8000
-```
-
-`python -m src.registry status` lists versions and aliases;
-`python -m src.registry promote` moves `@production` to the current staging
-version. Without a registry backend everything degrades gracefully to the
-committed `models/model.joblib`, so the repo still works with zero
-infrastructure.
-
-### Walk-forward backtesting
-
-The headline metrics come from a single 90-day held-out window — one draw
-from a noisy distribution. `python -m src.backtest` replays history the way
-production actually runs: train on the first year, forecast the next 30
-days, roll forward, retrain, repeat. Every prediction is out-of-sample, and
-the persistence/seasonal-naive baselines are computed on identical windows.
-Results land in `reports/backtest.md` / `.json` / `backtest_mae.png`.
-
-Honest headline from the current data (24 folds, 693 predictions): pooled
-model MAE **4.23 vs persistence 4.16** (−1.7%), beating persistence in 11 of
-24 folds, with RMSE slightly *better* than persistence (5.82 vs 5.90). The
-single 90-day test window's +4.5% MAE was the optimistic end of the
-distribution — over the whole history the point-forecast gap to persistence
-is essentially zero, consistent with the Phase 6 finding that next-day PM2.5
-in Colombo is dominated by its lag-1 autocorrelation. The model's value-add
-is the ~44% win over seasonal-naive, slightly better RMSE (fewer large
-misses), and calibrated prediction intervals — not a large average-MAE win.
-
-## Changing the Target City
-
-Edit `config.py`:
-
-```python
-CITY_NAME  = "Mumbai"
-LATITUDE   = 19.0760
-LONGITUDE  = 72.8777
-START_DATE = "2023-01-01"
-END_DATE   = "2025-12-31"
-```
-
-Then re-run `python -m src.train`.
-
-## Engineered Features
-
-All features are built by `src/features.py` (`make_features`), the **single
-source of truth** used identically at training and serving time.  There are
-**26 features** in four groups, plus the target.  Every feature for day *t* uses
-only information available up to and including day *t* (lags use `shift(k≥1)`;
-rolling windows are trailing / non-centred), so there is no leakage — see the
-leakage guarantee at the top of `src/features.py`.
-
-**Pollution context (today, day *t*)**
-
-| Feature | Description |
-|---------|-------------|
-| `pm2_5_mean` | Today's mean PM2.5 (µg/m³) |
-| `pm10_mean` | Today's mean PM10 (µg/m³) |
-
-**Weather (today, day *t*)**
-
-| Feature | Description |
-|---------|-------------|
-| `temperature_2m_mean` | Daily mean 2 m air temperature |
-| `wind_speed_10m_max` | Daily max 10 m wind speed |
-| `wind_direction_10m_dominant` | Dominant 10 m wind direction (degrees) |
-| `relative_humidity_2m_mean` | Daily mean 2 m relative humidity |
-| `precipitation_sum` | Daily total precipitation |
-| `surface_pressure_mean` | Daily mean surface pressure |
-
-**Lagged & rolling PM2.5 (past only)**
-
-| Feature | Description |
-|---------|-------------|
-| `pm25_lag1`, `pm25_lag2`, `pm25_lag3`, `pm25_lag7`, `pm25_lag14` | PM2.5 from *k* days ago (1/2/3/7/14; 7 = same weekday last week) |
-| `pm25_rolling3_mean`, `pm25_rolling7_mean`, `pm25_rolling14_mean`, `pm25_rolling30_mean` | Trailing rolling mean of PM2.5 over 3/7/14/30 days |
-| `pm25_rolling3_std`, `pm25_rolling7_std`, `pm25_rolling14_std`, `pm25_rolling30_std` | Trailing rolling std of PM2.5 over 3/7/14/30 days |
-| `pm25_diff1` | Day-over-day change: yesterday's PM2.5 minus the day before |
+| Feature | Meaning |
+|---------|---------|
+| `pm25_lag1` … `pm25_lag14` | PM2.5 from 1/2/3/7/14 days ago |
+| `pm25_rolling{3,7,14,30}_mean` | Backward rolling mean of PM2.5 |
+| `pm25_rolling{3,7,14,30}_std` | Backward rolling std of PM2.5 |
+| `pm25_diff1` | Change from two days ago to yesterday |
 
 **Calendar**
 
-| Feature | Description |
-|---------|-------------|
-| `day_of_week` | 0 (Monday) – 6 (Sunday) |
+| Feature | Meaning |
+|---------|---------|
+| `day_of_week` | 0 (Mon) – 6 (Sun) |
 | `month` | 1 – 12 |
 | `day_of_year` | 1 – 366 |
-| `is_weekend` | 1 if Saturday/Sunday, else 0 |
+| `is_weekend` | 1 on Sat/Sun, else 0 |
 
 **Target**
 
-| Column | Description |
-|--------|-------------|
-| `pm25_next_day` | **Target** — next day's mean PM2.5 (the only future-looking column; produced by `add_target`, never used at inference) |
+| Column | Meaning |
+|--------|---------|
+| `pm25_next_day` | Next day's mean PM2.5 — the only future-looking column, never used as input |
+```
