@@ -108,11 +108,18 @@ def test_predict_returns_expected_schema(monkeypatch) -> None:
         "pm25_lower",
         "pm25_upper",
         "interval_coverage",
+        "aqi_category",
+        "aqi_advice",
+        "unhealthy",
         "units",
         "model_version",
         "features",
     }
     assert set(body) == expected_keys
+    # PM2.5 42.0 falls in the EPA "Unhealthy for Sensitive Groups" band.
+    assert body["aqi_category"] == "Unhealthy for Sensitive Groups"
+    assert body["unhealthy"] is True
+    assert body["aqi_advice"]
     assert body["predicted_pm25"] == 42.0
     assert body["feature_date"] == "2024-04-01"
     assert body["prediction_date"] == "2024-04-02"

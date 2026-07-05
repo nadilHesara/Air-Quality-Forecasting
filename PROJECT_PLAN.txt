@@ -280,20 +280,41 @@
 --------------------------------------------------------------------------------
  GOAL: Tell the story well and make it multi-city.
 
- TASKS:
-   [ ] 9.1  Dashboard upgrades: predicted-vs-actual history, prediction
-            intervals band, AQI category + health guidance, SHAP explanation
-            for today's prediction ("why this number").
-   [ ] 9.2  Multi-city: parameterize the whole pipeline over a list of cities;
-            city selector in the dashboard; one model per city (or a global
-            model with city features).
-   [ ] 9.3  Write-up: a short blog/README section on method, honesty about the
-            persistence baseline, and results — with charts.
-   [ ] 9.4  Add a LICENSE, CONTRIBUTING note, and architecture diagram.
-   [ ] 9.5  (Stretch) Alerting: email/push when tomorrow's PM2.5 is predicted
-            to cross an unhealthy AQI threshold.
+ TASKS:  (polish path completed 2026-07-05; full multi-city deferred)
+   [x] 9.1  Dashboard upgrades: prediction-interval band (already shipped in
+            Phase 6) + AQI category & health guidance (new src/aqi.py, EPA
+            PM2.5 bands) shown as a coloured badge + "Why this number?" — the
+            top SHAP feature contributions for today's prediction
+            (src/inference.explain_prediction, surfaced in the dashboard).
+            The API's /predict now also returns aqi_category/aqi_advice/
+            unhealthy. (Predicted-vs-actual *history* still needs a store —
+            see the note on 8.6; the 30-day actual chart with the prediction
+            overlaid is present.)
+   [~] 9.2  Multi-city: LIGHT version done — the whole pipeline is already
+            parameterized on CITY_NAME/LATITUDE/LONGITUDE (config.py, env-
+            overridable since Phase 8.3), so any single city runs with no code
+            edit. NOT done: looping over a LIST of cities, a per-city model
+            store, and a city selector in the dashboard — that needs retrain/
+            storage rework and was intentionally deferred to keep this change
+            simple.
+   [x] 9.3  Write-up: README already carries the honest persistence-baseline
+            framing + backtest table ("How good is the model?"); this pass
+            added the new health-badge/explanation/alert features and a
+            docs/architecture.md diagram (Mermaid + prose).
+   [x] 9.4  LICENSE (MIT), CONTRIBUTING.md, and docs/architecture.md
+            (data-flow diagram + "one feature file" design note).
+   [x] 9.5  Alerting: src/alert.py — build_alert() turns a forecast into a
+            plain-English message; `python -m src.alert` prints tomorrow's
+            outlook and exits 1 when the air is unhealthy, so a scheduler can
+            fire email/Slack off the exit code. (No provider hard-wired —
+            needs secrets/a running service; left as the operator's hook.)
 
  DONE WHEN: The repo reads as a polished, explained, multi-city product.
+            ✓ for polish/explanation (health guidance, why-this-number,
+            alerting, LICENSE/CONTRIBUTING/architecture diagram, honest
+            write-up). Multi-city is single-city-configurable (9.2 light); a
+            full multi-city product (list of cities + per-city models + city
+            selector) remains a follow-up.
 
 
 ================================================================================

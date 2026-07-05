@@ -40,6 +40,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 import config  # noqa: E402
+from src.aqi import classify  # noqa: E402
 from src.inference import (  # noqa: E402
     MODEL_PATH,
     ModelNotFoundError,
@@ -112,6 +113,9 @@ class PredictResponse(BaseModel):
     interval_coverage: float | None = Field(
         None, description="Nominal coverage of [pm25_lower, pm25_upper], e.g. 0.8 for an 80% band."
     )
+    aqi_category: str = Field(..., description="Plain-English air-quality band, e.g. 'Moderate'.")
+    aqi_advice: str = Field(..., description="Short health guidance for that band.")
+    unhealthy: bool = Field(..., description="True if the forecast is unhealthy for sensitive groups or worse.")
     units: str
     model_version: str
     features: dict[str, float] = Field(..., description="The exact feature row fed to the model.")
@@ -189,6 +193,7 @@ def predict() -> PredictResponse:
             detail=f"Failed to produce a prediction from live data: {exc}",
         ) from exc
 
+    category = classify(result.predicted_pm25)
     response = PredictResponse(
         city=result.city,
         latitude=result.latitude,
@@ -199,6 +204,9 @@ def predict() -> PredictResponse:
         pm25_lower=result.pm25_lower,
         pm25_upper=result.pm25_upper,
         interval_coverage=result.interval_coverage,
+        aqi_category=category.name,
+        aqi_advice=category.advice,
+        unhealthy=category.unhealthy,
         units=result.units,
         model_version=result.model_version,
         features=result.features,

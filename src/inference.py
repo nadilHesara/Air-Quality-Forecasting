@@ -96,6 +96,9 @@ class PredictionResult:
     pm25_lower: float | None = None      # lower quantile (e.g. p10)
     pm25_upper: float | None = None      # upper quantile (e.g. p90)
     interval_coverage: float | None = None  # nominal band width, e.g. 0.8
+    # Top feature contributions to this prediction ("why this number"), each
+    # {feature, value, impact}; empty when SHAP is unavailable.
+    explanation: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _today_utc() -> date:
@@ -177,6 +180,40 @@ def predict_interval(
     lower, upper = preds[0], preds[-1]
     coverage = float(levels[-1] - levels[0])
     return round(lower, 2), round(upper, 2), coverage
+
+
+def explain_prediction(
+    bundle: dict[str, Any], feature_row: pd.DataFrame, top_n: int = 5
+) -> list[dict[str, Any]]:
+    """Explain one prediction: which features pushed it up or down, and by how much.
+
+    Uses SHAP on the point model.  Each returned item is one feature with its
+    actual value and its SHAP contribution in µg/m³ (positive = pushed the
+    prediction *up*, negative = pushed it *down*), sorted by size so the
+    dashboard can show the top few drivers of "why this number".
+
+    Returns an empty list if SHAP isn't available or fails, so the serving
+    path never breaks just because the explanation couldn't be built.
+    """
+    try:
+        import shap
+
+        explainer = shap.TreeExplainer(bundle["model"])
+        shap_values = explainer.shap_values(feature_row)[0]  # one row
+    except Exception:  # shap missing, unsupported model, etc.
+        return []
+
+    row = feature_row.iloc[0]
+    contributions = [
+        {
+            "feature": name,
+            "value": round(float(row[name]), 3),
+            "impact": round(float(shap_val), 3),  # µg/m³, signed
+        }
+        for name, shap_val in zip(feature_row.columns, shap_values, strict=False)
+    ]
+    contributions.sort(key=lambda c: abs(c["impact"]), reverse=True)
+    return contributions[:top_n]
 
 
 def fetch_recent_daily(
@@ -280,6 +317,7 @@ def predict_next_day(
 
     predicted = float(model.predict(feature_row)[0])
     lower, upper, coverage = predict_interval(bundle, feature_row)
+    explanation = explain_prediction(bundle, feature_row)
 
     # Recent actual PM2.5 for the dashboard chart.
     pm_actual = raw["pm2_5_mean"].dropna().tail(history_tail)
@@ -301,4 +339,5 @@ def predict_next_day(
         pm25_lower=lower,
         pm25_upper=upper,
         interval_coverage=coverage,
+        explanation=explanation,
     )

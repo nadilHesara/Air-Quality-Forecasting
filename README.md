@@ -63,16 +63,24 @@ Both share the **same** feature code and the **same** prediction path
 (`src/inference.py`), so the model always sees the same kind of input.
 
 **Web page (Streamlit)** — `src/dashboard.py`. Shows tomorrow's PM2.5, its
-low/high range, and the last 30 days as a chart.
+low/high range, and the last 30 days as a chart. It also shows:
+- a **health badge** — the air-quality category (Good, Moderate, Unhealthy…)
+  with a short health tip (`src/aqi.py`), and
+- **"Why this number?"** — the top features that pushed tomorrow's forecast up
+  or down, using SHAP, so the prediction isn't a black box.
 
 **API (FastAPI)** — `src/api.py`:
 - `GET /health` and `GET /ready` — is the model loaded and ready?
-- `GET /predict` — tomorrow's PM2.5 with the low/high range and the input
-  features. Docs at `/docs`.
+- `GET /predict` — tomorrow's PM2.5 with the low/high range, the air-quality
+  category + health advice, and the input features. Docs at `/docs`.
 
 The API caches each prediction for 15 minutes (the data only changes daily). If
 the data source goes down, it serves the last good answer instead of failing.
 Logs are one JSON line each, so hosts can read them easily.
+
+**Unhealthy-day alert** — `python -m src.alert` prints tomorrow's outlook and
+exits with code `1` if the air will be unhealthy, so a scheduled job can send an
+email or Slack message off that exit code.
 
 ## Change the city
 
@@ -165,15 +173,23 @@ Air-Quality-Forecasting/
 │   ├── drift.py            # Watch for data / error drift
 │   ├── backtest.py         # Walk-forward history replay
 │   ├── registry.py         # MLflow Model Registry helpers
-│   ├── inference.py        # Shared predict path (fetch → features → predict)
+│   ├── inference.py        # Shared predict path (fetch → features → predict + explain)
+│   ├── aqi.py              # PM2.5 → health category + advice
+│   ├── alert.py            # Warn when tomorrow is unhealthy
 │   ├── api.py              # FastAPI app (/health, /ready, /predict)
 │   └── dashboard.py        # Streamlit web page
+├── docs/architecture.md    # Diagram + how the pieces fit together
 ├── experiments/            # Offline model-improvement studies
 ├── scripts/                # EDA plot + MLflow server helpers
 ├── .github/workflows/      # ci.yml (tests) + retrain.yml (weekly retrain)
 ├── models/model.joblib     # The saved model (committed)
+├── LICENSE                 # MIT
+├── CONTRIBUTING.md
 └── reports/                # Metrics, plots, backtest, drift (generated)
 ```
+
+For a diagram of how data flows from the APIs to the forecast, see
+[`docs/architecture.md`](docs/architecture.md).
 
 ## Features used by the model
 
@@ -217,4 +233,9 @@ look backward), so there's no leakage.
 | Column | Meaning |
 |--------|---------|
 | `pm25_next_day` | Next day's mean PM2.5 — the only future-looking column, never used as input |
-```
+
+## Contributing & License
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for how to set
+up and what to run before a pull request. Released under the
+[MIT License](LICENSE).

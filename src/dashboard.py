@@ -30,6 +30,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 import config  # noqa: E402
+from src.aqi import classify  # noqa: E402
 from src.inference import ModelNotFoundError, predict_next_day  # noqa: E402
 
 st.set_page_config(page_title="PM2.5 Next-Day Forecast", page_icon="🌫️", layout="centered")
@@ -54,6 +55,7 @@ def _run_prediction() -> dict:
         "model_version": result.model_version,
         "features": result.features,
         "history": result.history,
+        "explanation": result.explanation,
     }
 
 
@@ -98,6 +100,18 @@ if latest_actual is not None:
         value=f"{round(latest_actual, 2)} {res['units']}",
     )
 
+# ── Air-quality category + health advice ─────────────────────────────────────
+category = classify(res["predicted_pm25"])
+st.markdown(
+    f"""
+    <div style="background:{category.color};color:#fff;padding:12px 16px;
+                border-radius:8px;margin:8px 0;">
+        <strong>{category.name}</strong> — {category.advice}
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 # ── Chart: last ~30 days actual + tomorrow's prediction overlaid ─────────────
 st.subheader("Last 30 days of actual PM2.5 (prediction overlaid)")
 
@@ -127,6 +141,26 @@ else:
             f"(p{int((1 - coverage) / 2 * 100)}–p{int((1 - (1 - coverage) / 2) * 100)})."
             if coverage else "Lower/upper bounds shown as forward points."
         )
+
+# ── Why this number? (SHAP explanation) ──────────────────────────────────────
+explanation = res.get("explanation") or []
+if explanation:
+    st.subheader("Why this number?")
+    st.caption(
+        "The biggest reasons behind tomorrow's prediction. A **+** value pushed "
+        "the forecast up; a **−** value pushed it down (µg/m³)."
+    )
+    expl_df = pd.DataFrame(explanation)
+    expl_df["direction"] = expl_df["impact"].apply(lambda x: "▲ up" if x > 0 else "▼ down")
+    expl_df = expl_df.rename(
+        columns={
+            "feature": "Feature",
+            "value": "Today's value",
+            "impact": "Effect (µg/m³)",
+            "direction": "Direction",
+        }
+    )
+    st.dataframe(expl_df, use_container_width=True, hide_index=True)
 
 # ── Details ──────────────────────────────────────────────────────────────────
 st.caption(f"Model version: `{res['model_version']}`")
