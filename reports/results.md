@@ -1,7 +1,7 @@
 # PM2.5 Next-Day Forecast — Results
 
 **Target:** `pm25_next_day` (next-day mean PM2.5, μg/m³)  
-**Data:** 1059 supervised rows (2023-07-20 → 2026-06-12), 26 features  
+**Data:** 1036 supervised rows (2023-08-12 → 2026-06-12), 26 features  
 **Validation:** TimeSeriesSplit expanding window, 5 folds (train pool only)  
 **Final test (held out, untouched):** 90 days (2026-03-15 → 2026-06-12)
 
@@ -11,14 +11,14 @@
 |---|---:|---:|
 | Persistence (today → tomorrow) | 3.467 | 4.900 |
 | Seasonal-naive (same weekday last week) | 5.427 | 6.962 |
-| **LightGBM** | **3.312** | **4.532** |
+| **LightGBM** | **3.426** | **4.588** |
 
 ## Improvement of LightGBM over baselines
 
 | Baseline | MAE improvement | RMSE improvement |
 |---|---:|---:|
-| vs persistence | +4.5% | +7.5% |
-| vs seasonal-naive | +39.0% | +34.9% |
+| vs persistence | +1.2% | +6.4% |
+| vs seasonal-naive | +36.9% | +34.1% |
 
 _(Positive = the model reduces the baseline's error.)_
 
@@ -29,11 +29,11 @@ Alongside the point forecast we ship quantile models at p10, p50, p90 (LightGBM 
 | Metric | Value |
 |---|---:|
 | Nominal coverage | 80% |
-| Empirical coverage (held-out test) | 80.0% |
-| Mean interval width | 13.02 µg/m³ |
-| Pinball loss @ p10 | 0.592 |
-| Pinball loss @ p50 | 1.527 |
-| Pinball loss @ p90 | 1.003 |
+| Empirical coverage (held-out test) | 78.9% |
+| Mean interval width | 12.73 µg/m³ |
+| Pinball loss @ p10 | 0.572 |
+| Pinball loss @ p50 | 1.571 |
+| Pinball loss @ p90 | 0.970 |
 
 _Empirical coverage near the nominal level means the band is well-calibrated; the API and dashboard surface this range so users see forecast uncertainty, not just a point._
 
@@ -41,8 +41,8 @@ _Empirical coverage near the nominal level means the band is well-calibrated; th
 
 TimeSeriesSplit expanding window, 5 folds (train pool only):
 
-- MAE  = 5.002 ± 2.224
-- RMSE = 6.521 ± 2.827
+- MAE  = 4.265 ± 1.397
+- RMSE = 5.661 ± 1.799
 
 ## Method notes (honesty / leakage)
 

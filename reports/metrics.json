@@ -1,14 +1,14 @@
 {
   "dataset": {
-    "raw_rows": 1089,
-    "supervised_rows": 1059,
+    "raw_rows": 1066,
+    "supervised_rows": 1036,
     "n_features": 26,
     "date_range": [
-      "2023-07-20",
+      "2023-08-12",
       "2026-06-12"
     ],
     "test_horizon_days": 90,
-    "train_rows": 969,
+    "train_rows": 946,
     "test_rows": 90,
     "test_period": [
       "2026-03-15",
@@ -17,10 +17,10 @@
   },
   "validation": {
     "scheme": "TimeSeriesSplit expanding window, 5 folds (train pool only)",
-    "mae_mean": 5.001811288111444,
-    "mae_std": 2.224466856476504,
-    "rmse_mean": 6.521270324968067,
-    "rmse_std": 2.826607055690603
+    "mae_mean": 4.2647878490411815,
+    "mae_std": 1.3974207212494434,
+    "rmse_mean": 5.660716723660693,
+    "rmse_std": 1.799339011830733
   },
   "baselines": {
     "persistence": {
@@ -49,8 +49,8 @@
       "verbose": -1
     },
     "test": {
-      "mae": 3.3124038779709557,
-      "rmse": 4.531810675965956
+      "mae": 3.425938197067304,
+      "rmse": 4.587671068415207
     }
   },
   "intervals": {
@@ -60,22 +60,22 @@
       0.9
     ],
     "nominal_coverage": 0.8,
-    "empirical_coverage": 0.8,
-    "mean_interval_width": 13.024577906379882,
+    "empirical_coverage": 0.7888888888888889,
+    "mean_interval_width": 12.733829454105136,
     "pinball_loss": {
-      "0.1": 0.5916353326564402,
-      "0.5": 1.5269628239712947,
-      "0.9": 1.0027018347604393
+      "0.1": 0.5716852527824877,
+      "0.5": 1.570559728641064,
+      "0.9": 0.9702181831573955
     }
   },
   "improvement_vs_baseline": {
     "persistence": {
-      "mae_pct": 4.46774940025549,
-      "rmse_pct": 7.510501730238747
+      "mae_pct": 1.19333316867335,
+      "rmse_pct": 6.370449764214828
     },
     "seasonal_naive": {
-      "mae_pct": 38.967385404488105,
-      "rmse_pct": 34.908380138252994
+      "mae_pct": 36.87546165483475,
+      "rmse_pct": 34.10604224494291
     }
   }
 }
