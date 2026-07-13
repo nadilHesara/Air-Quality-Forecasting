@@ -1,6 +1,6 @@
 # Drift report
 
-Checked: 2026-07-06T07:04:35+00:00  •  window: last 60 days
+Checked: 2026-07-13T06:00:24+00:00  •  window: last 60 days
 
 **Drift detected: YES**
 
@@ -8,7 +8,7 @@ Checked: 2026-07-06T07:04:35+00:00  •  window: last 60 days
 
 ## Feature drift (PSI vs training reference)
 
-Reference built: 2026-07-02T15:41:27+00:00  •  alerts: 21  •  warnings: 1
+Reference built: 2026-07-06T07:04:43+00:00  •  alerts: 21  •  warnings: 1
 
 | Feature | PSI | Status |
 |---|---:|---|
@@ -39,6 +39,6 @@ Reference built: 2026-07-02T15:41:27+00:00  •  alerts: 21  •  warnings: 1
 
 | Metric | Value |
 |---|---:|
-| Recent MAE (60 days, 2026-04-14 → 2026-06-12) | 2.606 |
-| Committed test MAE | 3.312 |
+| Recent MAE (60 days, 2026-04-14 → 2026-06-12) | 2.688 |
+| Committed test MAE | 3.426 |
 | Ratio | 0.79× (alert > 1.5×) |

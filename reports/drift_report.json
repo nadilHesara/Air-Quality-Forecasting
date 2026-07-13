@@ -1,8 +1,8 @@
 {
-  "checked_utc": "2026-07-06T07:04:35+00:00",
+  "checked_utc": "2026-07-13T06:00:24+00:00",
   "window_days": 60,
   "feature_drift": {
-    "reference_created": "2026-07-02T15:41:27+00:00",
+    "reference_created": "2026-07-06T07:04:43+00:00",
     "recent_window": [
       "2026-04-15",
       "2026-06-13"
@@ -128,9 +128,9 @@
       "2026-04-14",
       "2026-06-12"
     ],
-    "recent_mae": 2.6060429013925637,
-    "committed_test_mae": 3.3124038779709557,
-    "ratio": 0.787,
+    "recent_mae": 2.6882732062726546,
+    "committed_test_mae": 3.425938197067304,
+    "ratio": 0.785,
     "alert": false
   },
   "drift_detected": true,
