@@ -1,8 +1,8 @@
 {
-  "checked_utc": "2026-07-13T06:00:24+00:00",
+  "checked_utc": "2026-07-20T06:08:34+00:00",
   "window_days": 60,
   "feature_drift": {
-    "reference_created": "2026-07-06T07:04:43+00:00",
+    "reference_created": "2026-07-13T06:00:32+00:00",
     "recent_window": [
       "2026-04-15",
       "2026-06-13"
