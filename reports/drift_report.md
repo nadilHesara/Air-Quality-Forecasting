@@ -1,6 +1,6 @@
 # Drift report
 
-Checked: 2026-08-03T06:11:58+00:00  •  window: last 60 days
+Checked: 2026-08-10T04:24:13+00:00  •  window: last 60 days
 
 **Drift detected: YES**
 
@@ -8,7 +8,7 @@ Checked: 2026-08-03T06:11:58+00:00  •  window: last 60 days
 
 ## Feature drift (PSI vs training reference)
 
-Reference built: 2026-07-27T06:20:11+00:00  •  alerts: 21  •  warnings: 1
+Reference built: 2026-08-03T06:12:08+00:00  •  alerts: 21  •  warnings: 1
 
 | Feature | PSI | Status |
 |---|---:|---|
