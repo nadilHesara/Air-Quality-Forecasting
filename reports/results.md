@@ -11,14 +11,14 @@
 |---|---:|---:|
 | Persistence (today → tomorrow) | 3.467 | 4.900 |
 | Seasonal-naive (same weekday last week) | 5.427 | 6.962 |
-| **LightGBM** | **3.426** | **4.588** |
+| **LightGBM** | **3.404** | **4.552** |
 
 ## Improvement of LightGBM over baselines
 
 | Baseline | MAE improvement | RMSE improvement |
 |---|---:|---:|
-| vs persistence | +1.2% | +6.4% |
-| vs seasonal-naive | +36.9% | +34.1% |
+| vs persistence | +1.8% | +7.1% |
+| vs seasonal-naive | +37.3% | +34.6% |
 
 _(Positive = the model reduces the baseline's error.)_
 
@@ -29,11 +29,11 @@ Alongside the point forecast we ship quantile models at p10, p50, p90 (LightGBM 
 | Metric | Value |
 |---|---:|
 | Nominal coverage | 80% |
-| Empirical coverage (held-out test) | 78.9% |
-| Mean interval width | 12.73 µg/m³ |
-| Pinball loss @ p10 | 0.572 |
-| Pinball loss @ p50 | 1.571 |
-| Pinball loss @ p90 | 0.970 |
+| Empirical coverage (held-out test) | 75.6% |
+| Mean interval width | 12.82 µg/m³ |
+| Pinball loss @ p10 | 0.584 |
+| Pinball loss @ p50 | 1.543 |
+| Pinball loss @ p90 | 0.987 |
 
 _Empirical coverage near the nominal level means the band is well-calibrated; the API and dashboard surface this range so users see forecast uncertainty, not just a point._
 
@@ -41,8 +41,8 @@ _Empirical coverage near the nominal level means the band is well-calibrated; th
 
 TimeSeriesSplit expanding window, 5 folds (train pool only):
 
-- MAE  = 4.265 ± 1.397
-- RMSE = 5.661 ± 1.799
+- MAE  = 4.266 ± 1.410
+- RMSE = 5.666 ± 1.815
 
 ## Method notes (honesty / leakage)
 

@@ -17,10 +17,10 @@
   },
   "validation": {
     "scheme": "TimeSeriesSplit expanding window, 5 folds (train pool only)",
-    "mae_mean": 4.2647878490411815,
-    "mae_std": 1.3974207212494434,
-    "rmse_mean": 5.660716723660693,
-    "rmse_std": 1.799339011830733
+    "mae_mean": 4.265924361325733,
+    "mae_std": 1.4102834383220304,
+    "rmse_mean": 5.666342790586855,
+    "rmse_std": 1.815109650302336
   },
   "baselines": {
     "persistence": {
@@ -49,8 +49,8 @@
       "verbose": -1
     },
     "test": {
-      "mae": 3.425938197067304,
-      "rmse": 4.587671068415207
+      "mae": 3.403842776419431,
+      "rmse": 4.552445568131353
     }
   },
   "intervals": {
@@ -60,22 +60,22 @@
       0.9
     ],
     "nominal_coverage": 0.8,
-    "empirical_coverage": 0.7888888888888889,
-    "mean_interval_width": 12.733829454105136,
+    "empirical_coverage": 0.7555555555555555,
+    "mean_interval_width": 12.81956902494726,
     "pinball_loss": {
-      "0.1": 0.5716852527824877,
-      "0.5": 1.570559728641064,
-      "0.9": 0.9702181831573955
+      "0.1": 0.5843897046438549,
+      "0.5": 1.542567609952576,
+      "0.9": 0.9872171703032377
     }
   },
   "improvement_vs_baseline": {
     "persistence": {
-      "mae_pct": 1.19333316867335,
-      "rmse_pct": 6.370449764214828
+      "mae_pct": 1.8305819282456262,
+      "rmse_pct": 7.089365244253178
     },
     "seasonal_naive": {
-      "mae_pct": 36.87546165483475,
-      "rmse_pct": 34.10604224494291
+      "mae_pct": 37.2825802739427,
+      "rmse_pct": 34.61199561278253
     }
   }
 }
