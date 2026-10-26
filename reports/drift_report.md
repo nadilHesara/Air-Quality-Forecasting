@@ -1,6 +1,6 @@
 # Drift report
 
-Checked: 2026-10-19T08:18:48+00:00  •  window: last 60 days
+Checked: 2026-10-26T08:19:11+00:00  •  window: last 60 days
 
 **Drift detected: YES**
 
@@ -8,7 +8,7 @@ Checked: 2026-10-19T08:18:48+00:00  •  window: last 60 days
 
 ## Feature drift (PSI vs training reference)
 
-Reference built: 2026-10-12T10:01:58+00:00  •  alerts: 21  •  warnings: 1
+Reference built: 2026-10-19T08:18:57+00:00  •  alerts: 21  •  warnings: 1
 
 | Feature | PSI | Status |
 |---|---:|---|
@@ -31,7 +31,7 @@ Reference built: 2026-10-12T10:01:58+00:00  •  alerts: 21  •  warnings: 1
 | pm25_lag3 | 0.8278 | alert |
 | pm25_lag14 | 0.8024 | alert |
 | pm25_lag7 | 0.7958 | alert |
-| precipitation_sum | 0.6009 | alert |
+| precipitation_sum | 0.6348 | alert |
 | wind_direction_10m_dominant | 0.5934 | alert |
 | pm25_diff1 | 0.1463 | warn |
 
@@ -39,6 +39,6 @@ Reference built: 2026-10-12T10:01:58+00:00  •  alerts: 21  •  warnings: 1
 
 | Metric | Value |
 |---|---:|
-| Recent MAE (60 days, 2026-04-14 → 2026-06-12) | 2.678 |
-| Committed test MAE | 3.426 |
-| Ratio | 0.78× (alert > 1.5×) |
+| Recent MAE (60 days, 2026-04-14 → 2026-06-12) | 2.679 |
+| Committed test MAE | 3.404 |
+| Ratio | 0.79× (alert > 1.5×) |

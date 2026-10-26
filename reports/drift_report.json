@@ -1,8 +1,8 @@
 {
-  "checked_utc": "2026-10-19T08:18:48+00:00",
+  "checked_utc": "2026-10-26T08:19:11+00:00",
   "window_days": 60,
   "feature_drift": {
-    "reference_created": "2026-10-12T10:01:58+00:00",
+    "reference_created": "2026-10-19T08:18:57+00:00",
     "recent_window": [
       "2026-04-15",
       "2026-06-13"
@@ -107,7 +107,7 @@
       },
       {
         "feature": "precipitation_sum",
-        "psi": 0.6009,
+        "psi": 0.6348,
         "status": "alert"
       },
       {
@@ -128,9 +128,9 @@
       "2026-04-14",
       "2026-06-12"
     ],
-    "recent_mae": 2.6777936247246292,
-    "committed_test_mae": 3.425938197067304,
-    "ratio": 0.782,
+    "recent_mae": 2.6785060116516677,
+    "committed_test_mae": 3.403842776419431,
+    "ratio": 0.787,
     "alert": false
   },
   "drift_detected": true,
